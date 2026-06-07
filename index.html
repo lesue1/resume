@@ -357,6 +357,67 @@ body {
 .sheet-close:hover { background: #e5e5ea; color: var(--text); }
 .sheet-body { flex: 1; overflow-y: auto; padding: 20px 24px; -webkit-overflow-scrolling: touch; }
 
+/* ========== DETAIL SHEET VARIANT ========== */
+@media (min-width: 769px) {
+  #detailSheet {
+    top: 50%;
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    width: 560px;
+    max-height: 85vh;
+    border-radius: var(--radius-xl);
+    transform: translate(-50%, -50%) scale(.92);
+    opacity: 0;
+    transition: all .35s var(--spring);
+  }
+  #detailSheet.open {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  #detailOverlay.open #detailSheet {
+    /* handled by .open class on sheet itself */;
+  }
+  #detailSheet .sheet-body {
+    padding: 16px 24px 24px;
+  }
+  #detailSheet .detail-hero {
+    gap: 16px;
+    margin-bottom: 18px;
+    padding-bottom: 16px;
+  }
+  #detailSheet .detail-hero-photo {
+    width: 64px;
+    height: 64px;
+    font-size: 32px;
+  }
+  #detailSheet .detail-hero-info .hero-name {
+    font-size: 20px;
+  }
+  #detailSheet .detail-section-card {
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  #detailSheet .detail-info-row {
+    padding: 3px 0;
+    font-size: 13px;
+  }
+  #detailSheet .detail-info-row .info-key {
+    font-size: 12px;
+    min-width: 48px;
+  }
+  #detailSheet .detail-section-card .section-title {
+    font-size: 10px;
+    margin-bottom: 10px;
+  }
+}
+
+@media (max-width: 768px) {
+  #detailSheet {
+    /* Keep bottom sheet behavior on mobile */;
+  }
+}
+
 /* ========== FORM ELEMENTS ========== */
 .form-group { margin-bottom: 20px; }
 .form-group label {

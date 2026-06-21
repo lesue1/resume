@@ -1,0 +1,124 @@
+<!-- ══════════════════════ 简历库 V2 ══════════════════════ -->
+
+<div class="card" data-reveal>
+  <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;">
+    <input type="search" name="search" placeholder="🔍 搜索姓名、学校、公司、技能..."
+      style="flex:1;min-width:200px;"
+      hx-get="/api/resumes/list"
+      hx-trigger="keyup changed delay:300ms"
+      hx-target="#resume-list"
+      hx-indicator="#search-indicator">
+
+    <select name="status" id="filter-status" style="width:auto;"
+      hx-get="/api/resumes/list"
+      hx-trigger="change"
+      hx-target="#resume-list">
+      <option value="">全部状态</option>
+    </select>
+
+    <select name="degree" style="width:auto;"
+      hx-get="/api/resumes/list"
+      hx-trigger="change"
+      hx-target="#resume-list">
+      <option value="">全部学历</option>
+      <option value="本科">本科</option>
+      <option value="硕士">硕士</option>
+      <option value="博士">博士</option>
+      <option value="大专">大专</option>
+    </select>
+
+    <select name="direction" style="width:auto;"
+      hx-get="/api/resumes/list"
+      hx-trigger="change"
+      hx-target="#resume-list">
+      <option value="">全部方向</option>
+      <option value="后端">后端</option>
+      <option value="前端">前端</option>
+      <option value="算法">算法</option>
+      <option value="数据">数据</option>
+      <option value="DevOps">DevOps</option>
+      <option value="安全">安全</option>
+    </select>
+
+    <a href="/api/resumes/export" class="btn btn-secondary btn-sm">📥 CSV 导出</a>
+    <span id="search-indicator" class="htmx-indicator" style="color:var(--text-tertiary);font-size:var(--text-xs);">搜索中...</span>
+  </div>
+</div>
+
+<!-- 简历列表 -->
+<div id="resume-list" hx-get="/api/resumes/list" hx-trigger="load" hx-swap="innerHTML">
+  <p class="loading">加载中...</p>
+</div>
+
+<style>
+  .resume-card {
+    background: var(--bg); border-radius: var(--radius-md);
+    padding: var(--space-5) var(--space-6); margin-bottom: var(--space-3);
+    border: 0.5px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    transition: all 0.2s ease;
+  }
+  .resume-card:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--border-hover);
+    transform: translateY(-1px);
+  }
+  .rc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2); }
+  .rc-name { font-weight: 600; font-size: var(--text-base); letter-spacing: var(--tracking-tight); }
+  .rc-body { font-size: var(--text-sm); color: var(--text-secondary); }
+  .rc-row { margin-bottom: 3px; }
+  .rc-skills { margin-top: var(--space-2); }
+  .rc-footer { display: flex; justify-content: space-between; align-items: center; margin-top: var(--space-3); font-size: var(--text-xs); color: var(--text-tertiary); }
+  .rc-actions { display: flex; gap: var(--space-2); align-items: center; }
+  .status-select { width: auto; padding: 4px 8px; font-size: var(--text-xs); border-radius: var(--radius-sm); border: 0.5px solid var(--border); }
+</style>
+
+<script>
+// ── 动态加载阶段到筛选下拉 ──
+fetch('/api/stages').then(r => r.json()).then(stages => {
+  const sel = document.getElementById('filter-status');
+  stages.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.name;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+});
+
+// ── 更新状态 ──
+function changeStatus(id, status) {
+  if (!status) return;
+  fetch('/api/resumes/status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: id, status: status })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      htmx.trigger('#resume-list', 'refresh-list');
+    } else {
+      alert('更新失败: ' + data.error);
+    }
+  });
+}
+
+// ── 删除 ──
+function deleteCard(id) {
+  if (!confirm('确认删除这条简历？')) return;
+  fetch('/api/resumes/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: id })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) { htmx.trigger('#resume-list', 'refresh-list'); }
+  });
+}
+
+// ── 列表刷新 ──
+document.body.addEventListener('refresh-list', function() {
+  htmx.ajax('GET', '/api/resumes/list', { target: '#resume-list' });
+});
+</script>

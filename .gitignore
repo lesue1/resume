@@ -1,3 +1,13 @@
-_check.js
-patch_detail.py
-*.py
+# API Key 配置文件 — 绝不上传 GitHub
+config.py
+
+# SQLite 数据库文件 — 本地数据不提交
+*.db
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 虚拟环境
+venv/
+.env

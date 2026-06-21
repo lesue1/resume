@@ -1,0 +1,697 @@
+<!-- ══════════════════════════════════════════
+     数据分析 · Semi Design
+     ══════════════════════════════════════════ -->
+
+<!-- ── 顶部指标卡 ── -->
+<div id="analytics-stats" data-reveal>
+  <div style="display:flex;gap:var(--space-4);align-items:center;margin-bottom:var(--space-8);">
+    <div>
+      <h1 style="font-size:var(--text-3xl);font-weight:600;letter-spacing:var(--tracking-tight);line-height:var(--leading-tight);">数据分析</h1>
+      <p style="font-size:var(--text-sm);color:var(--text-tertiary);margin-top:4px;">招聘管道全貌与人才洞察</p>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:var(--space-2);">
+      <button onclick="openCardConfig()" class="btn btn-ghost btn-sm" data-tilt>📊 自定义</button>
+      <button id="btn-ai-analyze" class="btn btn-primary btn-sm" onclick="runAIAnalysis()">🤖 AI 诊断</button>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:var(--space-4);align-items:stretch;">
+    <div id="stats-cards" style="display:flex;gap:var(--space-4);flex:1;flex-wrap:wrap;"></div>
+    <button onclick="openCardConfig()" style="flex-shrink:0;width:44px;background:var(--card);border:1px dashed var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:1.3rem;color:var(--accent);transition:0.15s;display:flex;align-items:center;justify-content:center;">+</button>
+  </div>
+</div>
+
+<!-- ── AI 诊断 ── -->
+<div class="card" id="card-ai" data-reveal style="margin-top:var(--space-8);">
+  <div class="card-header" style="justify-content:space-between;">
+    <span>🤖 AI 招聘诊断</span>
+    <span style="font-size:var(--text-xs);color:var(--text-tertiary);font-weight:400;">多维度综合分析</span>
+  </div>
+  <div id="ai-analysis-result" style="font-size:var(--text-sm);line-height:1.8;">
+    <p style="text-align:center;padding:var(--space-8) var(--space-4);color:var(--text-tertiary);">点击右上角「AI 诊断」按钮，自动分析全流程数据</p>
+  </div>
+</div>
+
+<!-- ── 招聘漏斗 ── -->
+<div class="card" id="card-funnel" data-reveal style="margin-top:var(--space-5);">
+  <div class="card-header">
+    <span>📊 招聘漏斗</span>
+    <span style="font-size:var(--text-xs);color:var(--text-tertiary);font-weight:400;">累积人数 · 阶段转化率</span>
+    <button onclick="openStageModal()" class="btn btn-ghost btn-sm" style="margin-left:auto;">⚙️ 阶段</button>
+  </div>
+  <div class="chart-container" id="ct-funnel" style="min-height:360px;">
+    <svg id="svg-funnel" width="100%" height="360"></svg>
+    <div class="ct-tip" id="tip-funnel"></div>
+  </div>
+</div>
+
+<!-- ── 学历分布 ── -->
+<div class="card" id="card-degree" data-reveal style="margin-top:var(--space-5);">
+  <div class="card-header"><span>🎓 学历分布</span></div>
+  <div class="chart-container" id="ct-degree" style="min-height:280px;">
+    <svg id="svg-degree" width="100%" height="280"></svg>
+    <div class="ct-tip" id="tip-degree"></div>
+  </div>
+</div>
+
+<!-- ── 渠道 + 学校 ── -->
+<div style="display:flex;gap:var(--space-5);margin-top:var(--space-5);">
+  <div class="card" id="card-source" data-reveal style="flex:1;">
+    <div class="card-header"><span>📡 渠道来源</span></div>
+    <div class="chart-container" id="ct-source" style="min-height:300px;">
+      <svg id="svg-source" width="100%" height="300"></svg>
+      <div class="ct-tip" id="tip-source"></div>
+    </div>
+  </div>
+  <div class="card" id="card-school" data-reveal style="flex:1;">
+    <div class="card-header"><span>🏫 学校 TOP 10</span></div>
+    <div class="chart-container" id="ct-school" style="min-height:300px;">
+      <svg id="svg-school" width="100%" height="300"></svg>
+      <div class="ct-tip" id="tip-school"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 公司来源 ── -->
+<div class="card" id="card-company" data-reveal style="margin-top:var(--space-5);">
+  <div class="card-header"><span>🏢 公司来源 TOP 10</span></div>
+  <div class="chart-container" id="ct-company" style="min-height:320px;">
+    <svg id="svg-company" width="100%" height="320"></svg>
+    <div class="ct-tip" id="tip-company"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ 样式 ══════════════════════ -->
+<style>
+  #stats-cards .stat-card {
+    flex: 1; min-width: 190px;
+    padding: var(--space-6) var(--space-6) var(--space-5);
+    background: var(--bg); border-radius: var(--radius-lg);
+    border: 0.5px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer; position: relative;
+    transform-style: preserve-3d;
+    transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  #stats-cards .stat-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 8px 24px rgba(22,100,255,0.08);
+  }
+  #stats-cards .stat-card .card-edit-hint {
+    position: absolute; top: 12px; right: 14px;
+    font-size: 0.65rem; color: var(--text-tertiary); opacity: 0;
+    transition: opacity 0.25s;
+  }
+  #stats-cards .stat-card:hover .card-edit-hint { opacity: 1; }
+  .stat-icon { font-size: 1.5rem; margin-bottom: var(--space-3); line-height: 1; }
+  .stat-value {
+    font-size: 2.2rem; font-weight: 600;
+    letter-spacing: var(--tracking-tight); line-height: 1.1;
+    color: var(--text);
+  }
+  .stat-label { font-size: var(--text-sm); color: var(--text-secondary); font-weight: 450; margin-top: var(--space-1); }
+  .stat-sub { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--space-1); }
+
+  .chart-container { position: relative; cursor: pointer; user-select: none; }
+
+  /* ══════ Tooltip 浮窗动效 ══════ */
+  .ct-tip {
+    position: absolute; top: 0; left: 0;
+    pointer-events: none; z-index: 9999999; white-space: nowrap;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.97);
+    backdrop-filter: blur(12px);
+    border-radius: 10px;
+    border: 0.5px solid rgba(0,0,0,0.06);
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    font-size: 13px; color: var(--text);
+    box-shadow:
+      0px 6px 16px 0px  rgba(0,0,0,0.08),
+      0px 3px 6px  -4px rgba(0,0,0,0.12),
+      0px 9px 28px 8px  rgba(0,0,0,0.05);
+    transition:
+      opacity    0.2s cubic-bezier(0.23, 1, 0.32, 1),
+      visibility 0.2s cubic-bezier(0.23, 1, 0.32, 1),
+      transform  0.4s cubic-bezier(0.23, 1, 0.32, 1);
+    visibility: hidden; opacity: 0;
+    transform: translate3d(0,0,0);
+  }
+  .ct-tip.on { visibility: visible; opacity: 1; }
+  .ct-tip .tt-label { font-size: 12px; color: var(--text-tertiary); }
+  .ct-tip .tt-value { font-weight: 650; }
+  .ct-tip .tt-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+
+  /* 弹窗 */
+  .modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.2); z-index: 400;
+    display: flex; align-items: center; justify-content: center;
+    animation: fadeIn 0.2s ease;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .stage-modal-card {
+    background: var(--bg); border-radius: var(--radius-lg);
+    padding: var(--space-8); max-height: 82vh; overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    animation: scaleIn 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    border: 0.5px solid var(--border);
+  }
+  .stage-row {
+    display: flex; align-items: center; gap: var(--space-2);
+    padding: var(--space-2) 0; border-bottom: 0.5px solid var(--border);
+    user-select: none;
+  }
+  .stage-row:last-child { border-bottom: none; }
+  .stage-handle { cursor: grab; color: var(--text-tertiary); font-size: 1.1rem; }
+  .stage-name-input {
+    flex: 1; padding: 7px 12px; border: 0.5px solid var(--border);
+    border-radius: var(--radius-sm); font-size: var(--text-sm); font-family: inherit;
+    background: var(--bg); transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .stage-name-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(22,100,255,0.08); }
+  .stage-color-input {
+    width: 32px; height: 32px; border: 0.5px solid var(--border);
+    border-radius: var(--radius-sm); cursor: pointer; padding: 2px; background: var(--bg);
+  }
+  .stage-btn {
+    background: none; border: none; cursor: pointer; font-size: 0.95rem;
+    padding: 4px 7px; border-radius: var(--radius-sm); transition: 0.15s;
+    color: var(--text-secondary);
+  }
+  .stage-btn:hover { background: var(--surface); }
+  .stage-btn.del { color: var(--red); }
+  .stage-btn:disabled { opacity: 0.25; cursor: default; }
+  .card-config-row { transition: opacity 0.15s; }
+  .card-config-row.drag-over { border-top: 2px solid var(--accent); }
+
+  #ai-analysis-result h2 { font-size:var(--text-xl); font-weight:600; margin:var(--space-5) 0 var(--space-3); }
+  #ai-analysis-result h3 { font-size:var(--text-lg); font-weight:600; margin:var(--space-4) 0 var(--space-2); }
+  #ai-analysis-result b { color: var(--text); }
+
+  @media (max-width: 640px) {
+    #stats-cards { flex-direction: column; }
+    #stats-cards .stat-card { min-width: auto; }
+  }
+</style>
+
+<!-- ══════════════════════ 阶段管理弹窗 ══════════════════════ -->
+<div id="stage-modal" style="display:none;">
+  <div class="stage-modal-card" style="max-width:480px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-5);">
+      <span style="font-weight:600;font-size:var(--text-xl);letter-spacing:var(--tracking-tight);">⚙️ 管道阶段</span>
+      <button onclick="closeStageModal()" class="btn btn-ghost btn-sm">✕</button>
+    </div>
+    <div id="stage-list"></div>
+    <button onclick="addStageRow()" style="width:100%;margin-top:var(--space-3);padding:var(--space-3);background:transparent;border:1px dashed var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--accent);font-size:var(--text-sm);">+ 新增阶段</button>
+    <div style="display:flex;gap:var(--space-2);justify-content:flex-end;margin-top:var(--space-5);">
+      <button class="btn btn-secondary" onclick="closeStageModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveStages()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+let adata = null;
+let stages = [];
+let cardConfig = [];
+let _analyticsInited = false;
+
+const CARD_DEFAULTS = [
+  { type: 'stage_0', stageIdx: 0, label: '', icon: '📥' },
+  { type: 'stage_3', stageIdx: 3, label: '', icon: '👤' },
+  { type: 'rate', fromIdx: 0, toIdx: '', label: '', icon: '📈' },
+];
+
+const SC = ['#1664FF','#1AC6FF','#FF8A00','#3CC780','#7442D4','#FFC400','#304D77','#B48DEB'];
+
+document.body.addEventListener('htmx:afterSettle', function(evt) {
+  if (window.location.pathname === '/analytics' || evt.detail?.path === '/analytics') {
+    _analyticsInited = false;
+    initAnalytics();
+  }
+});
+initAnalytics();
+
+function initAnalytics() {
+  if (_analyticsInited && adata && stages.length) return;
+  _analyticsInited = true;
+
+  ['svg-funnel','svg-degree','svg-source','svg-school','svg-company'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  });
+
+  Promise.all([
+    fetch('/api/analytics/all').then(function(r){return r.json()}),
+    fetch('/api/stages').then(function(r){return r.json()}),
+  ]).then(function(res) {
+    adata = res[0]; stages = res[1];
+    loadCardConfig();
+    renderStats();
+    renderFunnel();
+    renderDegree();
+
+    renderSource();
+    renderSchool();
+    renderCompany();
+    observeReveal();
+    var s = document.querySelector('#analytics-stats');
+    if (s) s.classList.add('visible');
+  }).catch(function(err) {
+    console.error('Analytics init failed:', err);
+    _analyticsInited = false;
+  });
+}
+
+// ═══════════════════════════════════════════
+// 卡片配置
+// ═══════════════════════════════════════════
+function loadCardConfig() {
+  try {
+    var saved = localStorage.getItem('analytics_cards_v2');
+    if (saved) {
+      cardConfig = JSON.parse(saved);
+      cardConfig.forEach(function(c) {
+        if (c.type === 'stage') c.type = 'stage_' + (c.stageIdx || 0);
+      });
+      return;
+    }
+  } catch(e) {}
+  cardConfig = JSON.parse(JSON.stringify(CARD_DEFAULTS));
+  cardConfig[2].toIdx = stages.length > 0 ? stages.length - 1 : '';
+}
+
+function saveCardConfig() {
+  localStorage.setItem('analytics_cards_v2', JSON.stringify(cardConfig));
+  renderStats();
+}
+
+function renderStats() {
+  var container = document.getElementById('stats-cards');
+  var f = adata.funnel || [];
+  var fmap = {};
+  f.forEach(function(r) { fmap[r.name] = r.count; });
+  var total = adata.total_count || 0;
+
+  container.innerHTML = cardConfig.map(function(cfg, idx) {
+    var value = '—', label = cfg.label || '', sub = '';
+    var sidx = typeof cfg.stageIdx === 'number' ? cfg.stageIdx : -1;
+    var fidx = typeof cfg.fromIdx === 'number' ? cfg.fromIdx : -1;
+    var tidx = typeof cfg.toIdx === 'number' ? cfg.toIdx : stages.length - 1;
+    if (tidx < 0 || tidx >= stages.length) tidx = stages.length - 1;
+
+    if (cfg.type === 'total') {
+      value = total;
+      label = label || '简历总库';
+    } else if (cfg.type && cfg.type.indexOf('stage_') === 0 && sidx >= 0 && sidx < stages.length) {
+      value = fmap[stages[sidx].name] || 0;
+      label = label || stages[sidx].name;
+      sub = '到达该阶段';
+    } else if (cfg.type === 'rate' && fidx >= 0 && fidx < stages.length && tidx >= 0 && tidx < stages.length) {
+      var fromCount = fmap[stages[fidx].name] || 0;
+      var toCount = fmap[stages[tidx].name] || 0;
+      var pct = fromCount > 0 ? Math.round(toCount / fromCount * 100) : 0;
+      value = pct + '%';
+      label = label || (stages[fidx].name + ' → ' + stages[tidx].name);
+      sub = toCount + ' / ' + fromCount + ' 人';
+    }
+
+    return '<div class="stat-card" data-tilt onclick="editCard(' + idx + ')" title="点击配置此卡片">' +
+      '<span class="card-edit-hint">⚙</span>' +
+      '<div class="stat-icon">' + escHtml(cfg.icon || '📊') + '</div>' +
+      '<p class="stat-value">' + value + '</p>' +
+      '<p class="stat-label">' + escHtml(label) + '</p>' +
+      (sub ? '<p class="stat-sub">' + escHtml(sub) + '</p>' : '') + '</div>';
+  }).join('');
+}
+
+// ═══════════════════════════════════════════
+// 卡片配置弹窗
+// ═══════════════════════════════════════════
+function openCardConfig() {
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+
+  var listHtml = cardConfig.map(function(c, i) { return buildCardRow(c, i); }).join('');
+  overlay.innerHTML = '<div class="stage-modal-card" style="max-width:760px;" onclick="event.stopPropagation()">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-5);">' +
+    '<span style="font-weight:600;font-size:var(--text-xl);">📊 自定义指标卡</span>' +
+    '<button onclick="this.closest(\'.modal-overlay\').remove()" class="btn btn-ghost btn-sm">✕</button></div>' +
+    '<div id="card-config-list">' + listHtml + '</div>' +
+    '<button onclick="addCard()" style="width:100%;margin-top:var(--space-3);padding:var(--space-3);background:transparent;border:1px dashed var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--accent);font-size:var(--text-sm);">+ 新增指标卡</button>' +
+    '<div style="display:flex;gap:var(--space-2);justify-content:space-between;margin-top:var(--space-5);">' +
+    '<button class="btn btn-secondary btn-sm" onclick="resetCardConfig();this.closest(\'.modal-overlay\').remove();">恢复默认</button>' +
+    '<button class="btn btn-primary" onclick="this.closest(\'.modal-overlay\').remove();saveCardConfig();">完成</button></div></div>';
+  document.body.appendChild(overlay);
+}
+
+function buildCardRow(cfg, idx) {
+  var typeOpts = stages.map(function(s, i) { return ['stage_' + i, '📥 ' + s.name]; });
+  typeOpts.push(['rate', '📈 阶段转化率']);
+  var typeSel = typeOpts.map(function(p) {
+    return '<option value="' + p[0] + '" ' + (cfg.type === p[0] ? 'selected' : '') + '>' + p[1] + '</option>';
+  }).join('');
+
+  var stageOpts = stages.map(function(s, i) {
+    return '<option value="' + i + '" ' + (cfg.fromIdx === i ? 'selected' : '') + '>' + s.name + '</option>';
+  }).join('');
+
+  var detailHtml = '';
+  if (cfg.type === 'rate') {
+    var fromIdx = typeof cfg.fromIdx === 'number' ? cfg.fromIdx : 0;
+    var toOpts = stages.map(function(s, i) {
+      return '<option value="' + i + '" ' + (cfg.toIdx === i ? 'selected' : '') + ' ' + (i <= fromIdx ? 'disabled' : '') + '>' + s.name + '</option>';
+    }).join('');
+    detailHtml = '<span style="font-size:var(--text-xs);color:var(--text-tertiary);">从</span>' +
+      '<select onchange="updateCardConfig(' + idx + ',\'fromIdx\',this.value);refreshCardList();" style="width:auto;padding:6px 8px;font-size:var(--text-sm);">' + stageOpts + '</select>' +
+      '<span style="font-size:var(--text-xs);color:var(--text-tertiary);">→</span>' +
+      '<select onchange="updateCardConfig(' + idx + ',\'toIdx\',this.value)" style="width:auto;padding:6px 8px;font-size:var(--text-sm);">' + toOpts + '</select>';
+  }
+
+  return '<div class="stage-row card-config-row" draggable="true" data-idx="' + idx + '"' +
+    ' ondragstart="onCardDragStart(event,' + idx + ')" ondragend="onCardDragEnd(event)"' +
+    ' ondragover="onCardDragOver(event)" ondragleave="onCardDragLeave(event)"' +
+    ' ondrop="onCardDrop(event,' + idx + ')" style="flex-wrap:wrap;cursor:grab;">' +
+    '<span class="stage-handle">⠿</span>' +
+    '<span style="font-size:var(--text-xs);color:var(--text-tertiary);min-width:18px;">' + (idx+1) + '</span>' +
+    '<select onchange="updateCardConfig(' + idx + ',\'type\',this.value);refreshCardList();" style="width:auto;padding:6px 10px;font-size:var(--text-sm);max-width:170px;">' + typeSel + '</select>' +
+    '<input value="' + escHtml(cfg.icon||'') + '" placeholder="图标" onchange="updateCardConfig(' + idx + ',\'icon\',this.value)" style="width:44px;padding:6px 4px;font-size:var(--text-xs);text-align:center;">' +
+    '<input value="' + escHtml(cfg.label||'') + '" placeholder="自定义标签" onchange="updateCardConfig(' + idx + ',\'label\',this.value)" style="flex:1;min-width:60px;padding:6px 8px;font-size:var(--text-sm);">' +
+    detailHtml +
+    '<button class="stage-btn del" onclick="event.stopPropagation();removeCard(' + idx + ');refreshCardList();">✕</button></div>';
+}
+
+function refreshCardList() {
+  var list = document.getElementById('card-config-list');
+  if (list) list.innerHTML = cardConfig.map(function(c, i) { return buildCardRow(c, i); }).join('');
+  saveCardConfig();
+}
+
+function updateCardConfig(idx, key, value) {
+  if (key === 'type') {
+    var icon = cardConfig[idx].icon, label = cardConfig[idx].label;
+    cardConfig[idx] = { type: value, icon: icon, label: label };
+    if (value.indexOf('stage_') === 0) cardConfig[idx].stageIdx = parseInt(value.split('_')[1]);
+    else if (value === 'rate') { cardConfig[idx].fromIdx = 0; cardConfig[idx].toIdx = stages.length - 1; }
+  } else {
+    cardConfig[idx][key] = key.indexOf('Idx') >= 0 ? parseInt(value) : value;
+  }
+}
+
+function addCard() { cardConfig.push({ type: 'stage_0', stageIdx: 0, icon: '📊', label: '' }); refreshCardList(); }
+function removeCard(idx) { cardConfig.splice(idx, 1); saveCardConfig(); }
+
+var dragSrcIdx = -1;
+function onCardDragStart(e, idx) { dragSrcIdx = idx; e.target.style.opacity = '0.4'; e.dataTransfer.effectAllowed = 'move'; }
+function onCardDragEnd(e) { e.target.style.opacity = '1'; var rows = document.querySelectorAll('.card-config-row'); for (var i = 0; i < rows.length; i++) rows[i].style.borderTop = ''; dragSrcIdx = -1; }
+function onCardDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.currentTarget.style.borderTop = '2px solid var(--accent)'; }
+function onCardDragLeave(e) { e.currentTarget.style.borderTop = ''; }
+function onCardDrop(e, targetIdx) {
+  e.preventDefault(); e.currentTarget.style.borderTop = '';
+  if (dragSrcIdx < 0 || dragSrcIdx === targetIdx) return;
+  var moved = cardConfig.splice(dragSrcIdx, 1)[0];
+  cardConfig.splice(targetIdx, 0, moved);
+  dragSrcIdx = -1;
+  refreshCardList(); saveCardConfig();
+}
+
+function editCard(idx) {
+  openCardConfig();
+  setTimeout(function() {
+    var row = document.querySelector('.card-config-row[data-idx="' + idx + '"]');
+    if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 150);
+}
+
+function resetCardConfig() {
+  cardConfig = JSON.parse(JSON.stringify(CARD_DEFAULTS));
+  cardConfig[2].toIdx = stages.length > 0 ? stages.length - 1 : '';
+  saveCardConfig();
+}
+
+function escHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = String(str);
+  return div.innerHTML;
+}
+
+// ═══════════════════════════════════════════
+//  Tooltip 引擎
+// ═══════════════════════════════════════════
+function makeTtip(tipId, ctId) {
+  var tip = document.getElementById(tipId);
+  var ct = document.getElementById(ctId);
+  var EST_W = 200, EST_H = 80;
+  return {
+    show: function(html, evt) {
+      tip.innerHTML = html;
+      var r = ct.getBoundingClientRect();
+      var tx = evt.clientX - r.left + 14;
+      var ty = evt.clientY - r.top - EST_H - 8;
+      if (tx + EST_W > r.width) tx = evt.clientX - r.left - EST_W - 14;
+      if (ty < 0) ty = evt.clientY - r.top + 16;
+      tip.style.transform = 'translate3d(' + tx + 'px, ' + ty + 'px, 0)';
+      tip.classList.add('on');
+    },
+    hide: function() { tip.classList.remove('on'); }
+  };
+}
+
+// ═══════════════════════════════════════════
+//  SVG 图表
+// ═══════════════════════════════════════════
+
+function renderFunnel() {
+  var ff = adata.funnel || [];
+  if (!ff.length || !stages.length) return;
+  var svg = document.getElementById('svg-funnel');
+  var tip = makeTtip('tip-funnel', 'ct-funnel');
+  var W = svg.clientWidth || 700;
+  var H = 360, T = 30, B = 340, LH = B - T;
+  var L = 180, R = W - 40, FW = R - L;
+  var maxV = ff[0] ? ff[0].count : 1;
+  var barH = Math.min(40, LH / ff.length - 8);
+
+  var html = '';
+  ff.forEach(function(r, i) {
+    var y = T + i * (LH / ff.length) + (LH / ff.length - barH) / 2;
+    var w = (r.count / maxV) * FW;
+    var cx = L + (FW - w) / 2;
+    var color = stages[i] ? stages[i].color : SC[i % SC.length];
+    var prev = i > 0 ? ff[i-1].count : r.count;
+    var pct = Math.round(r.count / maxV * 100);
+    var conv = i > 0 ? Math.round(r.count / prev * 100) : 100;
+
+    html += '<text x="' + (L - 12) + '" y="' + (y + barH/2 + 4) + '" text-anchor="end" font-size="13" fill="#6e6e73">' + r.name + '</text>';
+    html += '<rect x="' + cx + '" y="' + y + '" width="' + Math.max(w, 2) + '" height="' + barH + '" fill="' + color + '" rx="4"/>';
+    html += '<text x="' + (cx + Math.max(w, 2) + 10) + '" y="' + (y + barH/2 + 4) + '" font-size="13" font-weight="600" fill="#1a1a2e" font-family="Menlo">' + r.count + '</text>';
+    html += '<text x="' + (cx + Math.max(w, 2) + 56) + '" y="' + (y + barH/2 + 4) + '" font-size="11" fill="#aeaeb2">' + pct + '% · ↑' + conv + '%</text>';
+    html += '<rect class="bar-hit" x="' + cx + '" y="' + y + '" width="' + Math.max(w, 200) + '" height="' + barH + '" fill="transparent" data-i="' + i + '"/>';
+  });
+
+  svg.innerHTML = html;
+
+  svg.onmousemove = function(e) {
+    var hit = e.target.closest('.bar-hit');
+    if (!hit) return tip.hide();
+    var d = ff[parseInt(hit.dataset.i)];
+    var prev = parseInt(hit.dataset.i) > 0 ? ff[parseInt(hit.dataset.i)-1] : null;
+    var conv = prev ? Math.round(d.count / prev.count * 100) : 100;
+    tip.show('<span class="tt-label">' + d.name + '</span> <span class="tt-value" style="color:#1664FF">' + d.count + '人</span><div class="tt-sub">转化率 ' + conv + '%</div>', e);
+  };
+  svg.onmouseleave = function() { tip.hide(); };
+}
+
+function renderDegree() {
+  var dd = adata.degree || [];
+  if (!dd.length) return;
+  var svg = document.getElementById('svg-degree');
+  var tip = makeTtip('tip-degree', 'ct-degree');
+  var W = svg.clientWidth || 400, H = 280;
+  var T = 10, B = H - 30, LH = B - T, L = 60, R = W - 50;
+  var maxV = Math.ceil(Math.max.apply(null, dd.map(function(d){return d.count})) / 10) * 10;
+  var barH = Math.min(28, (LH - (dd.length - 1) * 8) / dd.length);
+  var gap = Math.max(4, (LH - barH * dd.length) / (dd.length + 1));
+
+  var html = '';
+  for (var v = 0; v <= maxV; v += Math.ceil(maxV / 4)) {
+    var xx = L + (v / maxV) * (R - L);
+    if (v > 0) html += '<line x1="' + xx + '" y1="' + T + '" x2="' + xx + '" y2="' + B + '" stroke="#f0f0f5" stroke-width="0.5"/>';
+  }
+
+  dd.forEach(function(d, i) {
+    var y = T + gap + i * (barH + gap);
+    var w = (d.count / maxV) * (R - L);
+    html += '<text x="' + (L - 10) + '" y="' + (y + barH/2 + 4) + '" text-anchor="end" font-size="13" fill="#6e6e73">' + d.degree + '</text>';
+    html += '<rect x="' + L + '" y="' + y + '" width="' + Math.max(w, 2) + '" height="' + barH + '" fill="#1664FF" rx="3"/>';
+    html += '<text x="' + (L + Math.max(w, 2) + 8) + '" y="' + (y + barH/2 + 4) + '" font-size="13" font-weight="600" fill="#1a1a2e" font-family="Menlo">' + d.count + '</text>';
+    html += '<rect class="bar-hit" x="' + L + '" y="' + y + '" width="' + Math.max(w, 60) + '" height="' + barH + '" fill="transparent" data-i="' + i + '"/>';
+  });
+
+  svg.innerHTML = html;
+
+  svg.onmousemove = function(e) {
+    var hit = e.target.closest('.bar-hit');
+    if (!hit) return tip.hide();
+    var d = dd[parseInt(hit.dataset.i)];
+    tip.show('<span class="tt-label">' + d.degree + '</span> <span class="tt-value" style="color:#1664FF">' + d.count + '人</span>', e);
+  };
+  svg.onmouseleave = function() { tip.hide(); };
+}
+
+
+function renderSource() {
+  var dd = adata.source || [];
+  if (!dd.length) return;
+  var svg = document.getElementById('svg-source');
+  var tip = makeTtip('tip-source', 'ct-source');
+  var W = svg.clientWidth || 400;
+  var cx = W / 2, cy = 150, R = 100, ir = 45;
+  var total = dd.reduce(function(s, d) { return s + d.count; }, 0);
+
+  var html = '', angle = -Math.PI / 2;
+  dd.forEach(function(d, i) {
+    var slice = (d.count / total) * Math.PI * 2;
+    var x1 = cx + R * Math.cos(angle), y1 = cy + R * Math.sin(angle);
+    var x2 = cx + R * Math.cos(angle + slice), y2 = cy + R * Math.sin(angle + slice);
+    var large = slice > Math.PI ? 1 : 0;
+    html += '<path d="M' + cx + ' ' + cy + ' L' + x1.toFixed(1) + ' ' + y1.toFixed(1) + ' A' + R + ' ' + R + ' 0 ' + large + ' 1 ' + x2.toFixed(1) + ' ' + y2.toFixed(1) + ' Z" fill="' + SC[i % SC.length] + '" stroke="#fff" stroke-width="1.5" class="pie-slice" data-i="' + i + '"/>';
+    var mid = angle + slice / 2;
+    var lx = cx + (R + 18) * Math.cos(mid), ly = cy + (R + 18) * Math.sin(mid);
+    html += '<text x="' + lx.toFixed(1) + '" y="' + (ly + 4).toFixed(1) + '" text-anchor="' + (Math.cos(mid) > 0 ? 'start' : 'end') + '" font-size="12" fill="#6e6e73">' + d.source + '</text>';
+    angle += slice;
+  });
+  html += '<circle cx="' + cx + '" cy="' + cy + '" r="' + ir + '" fill="#fff"/>';
+  html += '<text x="' + cx + '" y="' + (cy - 4) + '" text-anchor="middle" font-size="11" fill="#aeaeb2">候选人</text>';
+  html += '<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" font-size="20" font-weight="700" fill="#1a1a2e">' + total + '</text>';
+
+  svg.innerHTML = html;
+
+  svg.onmousemove = function(e) {
+    var slice = e.target.closest('.pie-slice');
+    if (!slice) return tip.hide();
+    var d = dd[parseInt(slice.dataset.i)];
+    tip.show('<span class="tt-label">' + d.source + '</span> <span class="tt-value" style="color:' + SC[parseInt(slice.dataset.i) % SC.length] + '">' + d.count + '人</span> <span class="tt-label">（' + Math.round(d.count/total*100) + '%）</span>', e);
+  };
+  svg.onmouseleave = function() { tip.hide(); };
+}
+
+function renderSchool() {
+  var dd = adata.school || [];
+  if (!dd.length) return;
+  var svg = document.getElementById('svg-school');
+  var tip = makeTtip('tip-school', 'ct-school');
+  var W = svg.clientWidth || 400, H = 300;
+  var T = 8, B = H - 20, LH = B - T, L = 130, R = W - 40;
+  var maxV = Math.ceil(Math.max.apply(null, dd.map(function(d){return d.count})) / 10) * 10;
+  var barH = Math.min(26, (LH - (dd.length - 1) * 6) / dd.length);
+  var gap = Math.max(3, (LH - barH * dd.length) / (dd.length + 1));
+
+  var html = '';
+  dd.forEach(function(d, i) {
+    var y = T + gap + i * (barH + gap);
+    var w = (d.count / maxV) * (R - L);
+    html += '<text x="' + (L - 10) + '" y="' + (y + barH/2 + 4) + '" text-anchor="end" font-size="13" fill="#6e6e73">' + d.school + '</text>';
+    html += '<rect x="' + L + '" y="' + y + '" width="' + Math.max(w, 2) + '" height="' + barH + '" fill="#FF8A00" rx="3" opacity="' + (1 - i * 0.06) + '"/>';
+    html += '<text x="' + (L + Math.max(w, 2) + 8) + '" y="' + (y + barH/2 + 4) + '" font-size="13" font-weight="600" fill="#1a1a2e" font-family="Menlo">' + d.count + '</text>';
+    html += '<rect class="bar-hit" x="' + L + '" y="' + y + '" width="' + Math.max(w, 60) + '" height="' + barH + '" fill="transparent" data-i="' + i + '"/>';
+  });
+
+  svg.innerHTML = html;
+
+  svg.onmousemove = function(e) {
+    var hit = e.target.closest('.bar-hit');
+    if (!hit) return tip.hide();
+    var d = dd[parseInt(hit.dataset.i)];
+    tip.show('<span class="tt-label">TOP ' + (parseInt(hit.dataset.i)+1) + '</span> <span class="tt-value" style="color:#FF8A00">' + d.school + ' · ' + d.count + '人</span>', e);
+  };
+  svg.onmouseleave = function() { tip.hide(); };
+}
+
+function renderCompany() {
+  var dd = adata.company || [];
+  if (!dd.length) return;
+  var svg = document.getElementById('svg-company');
+  var tip = makeTtip('tip-company', 'ct-company');
+  var W = svg.clientWidth || 400, H = 320;
+  var T = 8, B = H - 20, LH = B - T, L = 130, R = W - 40;
+  var maxV = Math.ceil(Math.max.apply(null, dd.map(function(d){return d.count})) / 10) * 10;
+  var barH = Math.min(26, (LH - (dd.length - 1) * 6) / dd.length);
+  var gap = Math.max(3, (LH - barH * dd.length) / (dd.length + 1));
+
+  var html = '';
+  dd.forEach(function(d, i) {
+    var y = T + gap + i * (barH + gap);
+    var w = (d.count / maxV) * (R - L);
+    html += '<text x="' + (L - 10) + '" y="' + (y + barH/2 + 4) + '" text-anchor="end" font-size="13" fill="#6e6e73">' + d.current_company + '</text>';
+    html += '<rect x="' + L + '" y="' + y + '" width="' + Math.max(w, 2) + '" height="' + barH + '" fill="#B48DEB" rx="3" opacity="' + (1 - i * 0.06) + '"/>';
+    html += '<text x="' + (L + Math.max(w, 2) + 8) + '" y="' + (y + barH/2 + 4) + '" font-size="13" font-weight="600" fill="#1a1a2e" font-family="Menlo">' + d.count + '</text>';
+    html += '<rect class="bar-hit" x="' + L + '" y="' + y + '" width="' + Math.max(w, 60) + '" height="' + barH + '" fill="transparent" data-i="' + i + '"/>';
+  });
+
+  svg.innerHTML = html;
+
+  svg.onmousemove = function(e) {
+    var hit = e.target.closest('.bar-hit');
+    if (!hit) return tip.hide();
+    var d = dd[parseInt(hit.dataset.i)];
+    tip.show('<span class="tt-label">TOP ' + (parseInt(hit.dataset.i)+1) + '</span> <span class="tt-value" style="color:#B48DEB">' + d.current_company + ' · ' + d.count + '人</span>', e);
+  };
+  svg.onmouseleave = function() { tip.hide(); };
+}
+
+// ═══════════════════════════════════════════
+// AI 分析 & 阶段管理
+// ═══════════════════════════════════════════
+function runAIAnalysis() {
+  var el = document.getElementById('ai-analysis-result');
+  el.innerHTML = '<p style="text-align:center;padding:var(--space-8);color:var(--text-tertiary);">⏳ AI 正在分析全流程数据...</p>';
+  fetch('/api/analytics/ai-summary')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.success) {
+        el.innerHTML = data.analysis
+          .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+          .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+          .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+          .replace(/^- (.+)$/gm, '<span style="display:block;padding-left:var(--space-4);margin:2px 0;color:var(--text-secondary);">• $1</span>')
+          .replace(/\n/g, '<br>');
+      } else {
+        el.innerHTML = '<p class="error">分析失败: ' + escHtml(data.error || '未知错误') + '</p>';
+      }
+    })
+    .catch(function(err) {
+      el.innerHTML = '<p class="error">网络错误: ' + escHtml(err.message) + '</p>';
+    });
+}
+
+function openStageModal() { document.getElementById('stage-modal').style.display = 'flex'; renderStageList(); }
+function closeStageModal() { document.getElementById('stage-modal').style.display = 'none'; }
+
+function renderStageList() {
+  document.getElementById('stage-list').innerHTML = stages.map(function(s, i) {
+    return '<div class="stage-row">' +
+    '<span class="stage-handle">⠿</span>' +
+    '<span style="font-size:var(--text-xs);color:var(--text-tertiary);min-width:18px;">' + (i+1) + '</span>' +
+    '<input class="stage-name-input" value="' + escHtml(s.name) + '" onchange="stages[' + i + '].name=this.value">' +
+    '<input type="color" class="stage-color-input" value="' + s.color + '" onchange="stages[' + i + '].color=this.value">' +
+    '<button class="stage-btn" onclick="moveStage(' + i + ',-1)" ' + (i===0?'disabled':'') + '>▲</button>' +
+    '<button class="stage-btn" onclick="moveStage(' + i + ',1)" ' + (i===stages.length-1?'disabled':'') + '>▼</button>' +
+    '<button class="stage-btn del" onclick="stages.splice(' + i + ',1);renderStageList();">✕</button></div>';
+  }).join('');
+}
+
+function addStageRow() { stages.push({ name: '新阶段', color: '#1664FF', sort_order: stages.length + 1 }); renderStageList(); }
+function moveStage(idx, dir) { var t = idx + dir; if (t < 0 || t >= stages.length) return; var tmp = stages[idx]; stages[idx] = stages[t]; stages[t] = tmp; renderStageList(); }
+
+function saveStages() {
+  fetch('/api/stages/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(stages.map(function(s, i) { return { id: s.id, name: s.name, color: s.color, sort_order: i + 1 }; }))
+  }).then(function() { _analyticsInited = false; initAnalytics(); closeStageModal(); });
+}
+</script>

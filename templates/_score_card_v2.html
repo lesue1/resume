@@ -1,0 +1,91 @@
+{# _score_card_v2.html — AI 评分结果卡片（Apple 风格） #}
+
+{% set total = result.total_score %}
+{% if total >= 80 %}
+  {% set badge_class = "score-high" %}
+  {% set color = "#34c759" %}
+  {% set level = "优秀" %}
+{% elif total >= 60 %}
+  {% set badge_class = "score-mid" %}
+  {% set color = "#f56300" %}
+  {% set level = "良好" %}
+{% else %}
+  {% set badge_class = "score-low" %}
+  {% set color = "#ff3b30" %}
+  {% set level = "需要关注" %}
+{% endif %}
+
+<div class="card" id="score-result" data-scores='{{ {"total_score": total, "scores": result.scores, "summary": result.summary or ""} | tojson | safe }}' data-reveal>
+
+  <!-- 总分 + 亮点风险 -->
+  <div style="display:flex;gap:var(--space-5);align-items:flex-start;flex-wrap:wrap;">
+    <!-- 总分圆 -->
+    <div style="text-align:center;flex-shrink:0;">
+      <div class="score-badge {{ badge_class }}">{{ total }}</div>
+      <p style="color:{{ color }};font-weight:600;font-size:var(--text-sm);margin-top:var(--space-2);">{{ level }}</p>
+    </div>
+
+    <!-- 亮点 / 风险 -->
+    <div style="flex:1;min-width:200px;">
+      {% if result.highlights %}
+      <div style="padding:var(--space-2) var(--space-4);background:var(--green-light);border-radius:var(--radius-sm);margin-bottom:var(--space-1);">
+        <span style="font-weight:600;color:#2e7d32;font-size:var(--text-sm);">✅ 优势</span>
+        {% for h in result.highlights %}
+        <span style="font-size:var(--text-sm);color:#1b5e20;">{{ h }}{% if not loop.last %} · {% endif %}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if result.risks %}
+      <div style="padding:var(--space-2) var(--space-4);background:var(--orange-light);border-radius:var(--radius-sm);">
+        <span style="font-weight:600;color:#e65100;font-size:var(--text-sm);">⚠️ 风险</span>
+        {% for r in result.risks %}
+        <span style="font-size:var(--text-sm);color:#bf360c;">{{ r }}{% if not loop.last %} · {% endif %}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- 5 维度评分 -->
+  <div style="margin-top:var(--space-4);">
+    {% for dim_name, dim_data in result.scores.items() %}
+    {% set score = dim_data.score %}
+    <div style="padding:var(--space-1) 0;">
+      <div style="display:flex;align-items:center;gap:var(--space-3);">
+        <span style="width:82px;font-size:var(--text-sm);font-weight:500;flex-shrink:0;letter-spacing:var(--tracking-normal);">{{ dim_name }}</span>
+        <div style="flex:1;height:6px;background:var(--surface);border-radius:3px;overflow:hidden;">
+          <div class="dim-bar" style="height:100%;width:{{ score }}%;background:{{ color }};border-radius:3px;"></div>
+        </div>
+        <span style="width:32px;text-align:right;font-weight:600;font-size:var(--text-sm);">{{ score }}</span>
+      </div>
+      <div style="font-size:var(--text-xs);color:var(--text-tertiary);padding:2px 0 var(--space-1) 92px;">{{ dim_data.reason }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- 面试建议 -->
+  {% if result.interview_questions %}
+  <div style="margin-top:var(--space-4);padding:var(--space-4);background:var(--purple-light);border-radius:var(--radius-md);border:0.5px solid rgba(124,92,231,0.15);">
+    <div style="font-weight:650;font-size:var(--text-sm);margin-bottom:var(--space-3);color:#5b3cc4;">🎯 面试必问（基于简历弱点生成）</div>
+    {% for iq in result.interview_questions %}
+    <div style="margin-bottom:var(--space-2);padding:var(--space-3) var(--space-4);background:var(--bg);border-radius:var(--radius-sm);border-left:3px solid #7c5ce7;">
+      <div style="font-weight:600;font-size:var(--text-sm);margin-bottom:4px;">Q{{ loop.index }}：{{ iq.问题 }}</div>
+      <div style="font-size:var(--text-xs);color:var(--text-secondary);line-height:1.6;">
+        <span style="color:#5b3cc4;">考察：</span>{{ iq.考察点 }}<br>
+        <span style="color:var(--green);">期望：</span>{{ iq.关注点 }}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- 综合评语 -->
+  {% if result.summary %}
+  <div style="margin-top:var(--space-3);padding:var(--space-4);background:var(--bg-elevated);border-radius:var(--radius-sm);font-size:var(--text-sm);line-height:1.7;white-space:pre-line;">{{ result.summary }}</div>
+  {% endif %}
+
+  <!-- 保存失败警告 -->
+  {% if result.save_error %}
+  <div style="margin-top:var(--space-3);padding:var(--space-2) var(--space-4);background:var(--orange-light);border-radius:var(--radius-sm);font-size:var(--text-xs);color:#e65100;">⚠️ 评分结果未保存到数据库：{{ result.save_error }}</div>
+  {% endif %}
+</div>

@@ -483,6 +483,10 @@
         if (a.getAttribute('hx-get') === path) a.classList.add('active');
       });
     }
+    // 评估页：加载岗位列表到下拉框
+    if (window.location.pathname === '/evaluate') {
+      setTimeout(loadEvalJobList, 50);  // 等 DOM 完全就绪
+    }
   });
 
   // ── 滚动揭示：扫描当前 + HTMX 换页后重新观察 ──
@@ -493,7 +497,33 @@
     });
   }
   observeReveal();
+  // 首次加载评估页时加载岗位
+  if (window.location.pathname === '/evaluate') setTimeout(loadEvalJobList, 100);
   document.body.addEventListener('htmx:afterSettle', observeReveal);
+
+  // ── 评估页岗位列表加载 ──
+  let _evalJobListLoaded = false;
+  window.loadEvalJobList = function() {
+    const sel = document.getElementById('job-selector');
+    if (!sel) { _evalJobListLoaded = false; return; }
+    if (_evalJobListLoaded && sel.options.length > 1) return;  // 已加载，跳过
+    _evalJobListLoaded = true;
+
+    fetch('/api/jobs/list?format=json')
+      .then(r => r.json())
+      .then(jobs => {
+        if (!Array.isArray(jobs)) return;
+        // 清空除了占位项
+        while (sel.options.length > 1) sel.remove(1);
+        jobs.forEach(j => {
+          const opt = document.createElement('option');
+          opt.value = j.id;
+          opt.textContent = j.title;
+          sel.appendChild(opt);
+        });
+      })
+      .catch(err => console.error('岗位列表加载失败:', err));
+  };
 
   // ══════════════════════════════════════════════════════
   // Toast 通知系统

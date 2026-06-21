@@ -154,8 +154,8 @@ function setResumeText(text) {
   m = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
   if (m) email = m[1];
 
-  // 手机：中国大陆手机号
-  m = text.match(/(?:手机|电话|phone|tel)[：:\s]*)?(\+?86[\s-]?)?(1[3-9]\d[\s-]?\d{4}[\s-]?\d{4})/i);
+  // 手机：中国大陆手机号（可选前缀：手机/电话/phone/tel + 冒号）
+  m = text.match(/(?:手机|电话|phone|tel)[：:\s]*(\+?86[\s-]?)?(1[3-9]\d[\s-]?\d{4}[\s-]?\d{4})/i);
   if (!m) m = text.match(/(1[3-9]\d)[\s-]?(\d{4})[\s-]?(\d{4})/);
   if (m) phone = (m[2] || '') ? (m[1] || '') + (m[2] || '') + (m[3] || '') : m[1] || '';
   phone = phone.replace(/[\s-]/g, '');

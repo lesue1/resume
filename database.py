@@ -92,6 +92,20 @@ def init_db():
         )
     """)
 
+    # ── 兼容旧表：加 token_info 列（如果还没有） ──
+    try:
+        cur.execute("ALTER TABLE evaluations ADD COLUMN token_info TEXT DEFAULT ''")
+    except:
+        pass  # 列已存在
+
+    # ── 索引（加速查询，IF NOT EXISTS 避免重复创建） ──
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_resumes_status ON resumes(interview_status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_resumes_degree ON resumes(degree)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_resumes_direction ON resumes(tech_direction)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_resumes_created ON resumes(created_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_evaluations_time ON evaluations(evaluated_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at)")
+
     conn.commit()
     conn.close()
     seed_stages()
@@ -239,28 +253,29 @@ def delete_job(job_id):
 # =============================================================================
 
 def save_evaluation(name, email, phone, job_title, total, scores_dict,
-                    jd_text, resume_text):
+                    jd_text, resume_text, token_info=None):
     """保存一次 AI 评分到数据库。
 
     参数:
         scores_dict: {'技能匹配度': {'score': 85, 'reason': '...'}, ...}
-                     存进 SQLite 前先用 json.dumps() 转成字符串
+        token_info: {'prompt': 500, 'completion': 200, 'total': 700} 或 None
     """
     conn = get_conn()
     conn.execute("""
         INSERT INTO evaluations
             (candidate_name, email, phone, job_title, total_score,
-             scores_json, jd_text, resume_text, evaluated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             scores_json, jd_text, resume_text, token_info, evaluated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         name or "未知",
         email or "",
         phone or "",
         job_title or "未指定岗位",
         round(total, 1),
-        json.dumps(scores_dict, ensure_ascii=False),  # ensure_ascii=False 让中文正常显示
+        json.dumps(scores_dict, ensure_ascii=False),
         jd_text or "",
         resume_text or "",
+        json.dumps(token_info, ensure_ascii=False) if token_info else "",
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     ))
     conn.commit()
@@ -340,9 +355,9 @@ def get_resumes(status_filter='', search='', degree='', direction=''):
         params.append(direction)
     if search:
         # LIKE 是模糊匹配，% 是通配符，表示"任意字符"
-        sql += " AND (name LIKE ? OR school LIKE ? OR current_company LIKE ? OR skills LIKE ?)"
+        sql += " AND (name LIKE ? OR school LIKE ? OR current_company LIKE ? OR skills LIKE ? OR resume_text LIKE ?)"
         kw = f"%{search}%"
-        params.extend([kw, kw, kw, kw])
+        params.extend([kw, kw, kw, kw, kw])
 
     sql += " ORDER BY created_at DESC"
     df = pd.read_sql_query(sql, conn, params=params)

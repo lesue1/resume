@@ -40,7 +40,7 @@
       <option value="安全">安全</option>
     </select>
 
-    <a href="/api/resumes/export" class="btn btn-secondary btn-sm">📥 CSV 导出</a>
+    <a id="export-link" href="/api/resumes/export" class="btn btn-secondary btn-sm">CSV 导出</a>
     <span id="search-indicator" class="htmx-indicator" style="color:var(--text-tertiary);font-size:var(--text-xs);">搜索中...</span>
   </div>
 </div>
@@ -98,7 +98,7 @@ function changeStatus(id, status) {
     if (data.success) {
       htmx.trigger('#resume-list', 'refresh-list');
     } else {
-      alert('更新失败: ' + data.error);
+      toast('更新失败: ' + data.error, 'error');
     }
   });
 }
@@ -113,9 +113,34 @@ function deleteCard(id) {
   })
   .then(res => res.json())
   .then(data => {
-    if (data.success) { htmx.trigger('#resume-list', 'refresh-list'); }
+    if (data.success) {
+      toast('已删除', 'success');
+      htmx.trigger('#resume-list', 'refresh-list');
+    } else {
+      toast('删除失败: ' + (data.error || '未知错误'), 'error');
+    }
   });
 }
+
+// ── 导出链接跟随筛选 ──
+function updateExportLink() {
+  const params = new URLSearchParams();
+  const status = document.getElementById('filter-status')?.value || '';
+  const search = document.querySelector('input[name="search"]')?.value || '';
+  const degree = document.querySelector('select[name="degree"]')?.value || '';
+  const direction = document.querySelector('select[name="direction"]')?.value || '';
+  if (status) params.set('status', status);
+  if (search) params.set('search', search);
+  if (degree) params.set('degree', degree);
+  if (direction) params.set('direction', direction);
+  document.getElementById('export-link').href = '/api/resumes/export?' + params.toString();
+}
+// 监听筛选变化
+['input[name="search"]', 'select[name="status"]', 'select[name="degree"]', 'select[name="direction"]'].forEach(sel => {
+  const el = document.querySelector(sel);
+  if (el) el.addEventListener('change', updateExportLink);
+});
+document.querySelector('input[name="search"]')?.addEventListener('input', updateExportLink);
 
 // ── 列表刷新 ──
 document.body.addEventListener('refresh-list', function() {

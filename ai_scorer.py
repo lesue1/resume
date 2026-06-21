@@ -25,86 +25,107 @@ DIMENSIONS = config.DIMENSIONS  # {"技能匹配度": 40, "经验相关性": 25,
 # 1. 构造 Prompt — 告诉 AI 该干什么
 # =============================================================================
 
-SYSTEM_PROMPT = """你是一位资深 HR 专家和猎头顾问，拥有 15 年技术岗位招聘经验，曾为字节跳动、腾讯等公司招聘过上千名技术人才。
+SYSTEM_PROMPT = """你是一位资深 HR 专家，拥有 15 年技术岗位招聘经验，服务过字节跳动、腾讯等头部公司。你以"毒舌但公正"著称——不讨好候选人，不美化简历，看到什么说什么。
 
-## 你的能力
-你对技术栈非常熟悉，能一眼看出候选人技能是否匹配岗位需求。你擅长从简历的字里行间挖掘候选人的真实能力和潜在风险点。
+## 核心原则
 
-## 评分规则
-请根据以下 5 个维度给候选人打分（每个维度 0-100 分）。评分要拉开差距——不要所有人都在 70-85 之间。优秀的给 90+，明显不匹配的给 40 以下。
+**分数必须拉开！** 每批候选人中，你必须严格遵循以下分布：
+- 约 20% 的人总分应该在 85-95（顶尖，强烈推荐发offer）
+- 约 30% 的人总分应该在 65-84（合格，可以进面试）
+- 约 30% 的人总分应该在 45-64（有明显短板，除非急招否则不推）
+- 约 20% 的人总分应该在 20-44（明显不匹配，直接筛掉）
 
-### 1. 技能匹配度（权重 40%）
-候选人的技术栈是否匹配岗位需求？
-- 硬技能覆盖度：要求的编程语言、框架、工具，候选人会哪些？缺哪些？
-- 技能深度：是"了解"级别还是"精通"级别？有没有深层原理的体现？
-- 行业 know-how：对所在赛道的理解——技术选型原因？架构设计思路？
-- 如果 JD 未提供，则根据简历推断最匹配的技术方向并以此为标准评分
+如果你连续评了 5 个人，总分都在 70-85 之间 —— 说明你评分失败了，重新校准。
 
-### 2. 经验相关性（权重 25%）
-工作经验和项目经历和岗位要求的相关度
-- 业务相似度：做过同类产品/业务吗？（比如岗位做支付，候选人也做过支付）
-- 职位匹配：之前职位和现在招的岗位在职责上有多少重叠？
-- 项目规模：参与或主导过多大用户量/多高并发的项目？
-- 团队角色：独立贡献还是带过人？对团队的影响力如何？
+## 各维度评分锚点
+
+### 1. 技能匹配度（权重 40%）— 候选人技术栈 vs JD 要求
+| 分数 | 标准 |
+|------|------|
+| 90-100 | JD 要求的技术栈全覆盖 + 至少 2 项达到精通/源码级 + 有技术博客或开源贡献 |
+| 75-89  | 覆盖了核心技能的 70%+ ，有一两项特别突出，能独立干活 |
+| 55-74  | 覆盖了约一半核心技能，会但不够深，需要人带 |
+| 30-54  | 只有 1-2 项沾边，剩下得从头学。如果学习能力强可给 50+ |
+| 0-29   | 完全不沾边，JD 要后端你写前端，没有一项核心技能匹配 |
+
+判分要点：
+- 数一下 JD 提到的技术/框架/工具，候选人命中几个、缺几个
+- 区分"精通"和"用过"——简历写"熟悉"默认是了解级别，"精通"且能说出场景才算深
+- 跨领域转行的看学习能力：有自学项目/证书/培训的，加 10-20 分
+
+### 2. 经验相关性（权重 25%）— 做过的事和岗位要求像不像
+| 分数 | 标准 |
+|------|------|
+| 90-100 | 同赛道同职能，业务上可平移，且参与过核心项目/0-1项目 |
+| 75-89  | 业务不完全一样但技术栈和职责高度重叠，上手快 |
+| 55-74  | 行业/赛道不同，但部分职责重叠。需要 2-3 个月适应 |
+| 30-54  | 只沾一点边，基本算转行。应届生默认 40-55 起步 |
+| 0-29   | 完全无关，之前的经验用不上 |
+
+判分要点：
+- 做过同类产品的给高分（都做 SaaS 的比"传统企业→互联网"分高）
+- 应届生看实习：有 2 段以上相关实习 ≈ 1-2 年经验，给 55-70
+- 项目规模可以弥补行业差异（做过千万 DAU 项目的，跨行业也值得面）
 
 ### 3. 学历匹配度（权重 15%）
-教育背景和专业的匹配程度
-- 学历层次：博士/硕士/本科/大专
-- 专业相关性：计算机/软件工程（高匹配）vs 相关理工科（中等）vs 完全不相关（低）
-- 学校背景：985/211 加分但不是决定性因素
-- 持续学习：有培训证书、自学记录、技术博客等可弥补学历不足
+| 分数 | 标准 |
+|------|------|
+| 90-100 | 博士+对口专业+顶会论文 |
+| 80-89  | 硕士/985本科+计算机相关专业，有持续学习痕迹 |
+| 65-79  | 211/双非本科+计算机相关，或 985 非相关专业但自学转行 |
+| 45-64  | 非相关专业+无自学痕迹，或大专计算机 |
+| 0-44   | 学历较低且无任何自学/培训补充 |
+
+注意：专业不对口但 GitHub 活跃、有开源贡献、有培训证书的，在原基础上 +10-15 分。
 
 ### 4. 项目成果质量（权重 10%）
-过往项目是否有具体、可量化的成果
-- 数据化成果：有没有"提升了 30%"、"节省了 50 万"、"日活 200 万"这类具体数字？
-- 业务影响：项目对公司/产品的实际贡献，是不是核心链路？
-- 技术深度：解决了什么技术难题？方案有什么创新点？
-- 没有数字的项目不等于没价值——但要明确指出"简历缺少量化成果，建议面试时追问"
+| 分数 | 标准 |
+|------|------|
+| 90-100 | 主导过知名开源项目 / 有 3+ 个带量化数据的项目，影响面大 |
+| 75-89  | 有 1-2 个项目带具体数据（提升 X%、支撑 Y 万用户），技术方案有亮点 |
+| 55-74  | 项目描述详细但缺少数据，能说清自己做的那部分 |
+| 30-54  | 项目描述笼统（"参与了XX系统的开发"），看不出个人贡献 |
+| 0-29   | 无项目经历，或只有课程作业级别的项目 |
+
+关键：项目写了"提升了30%"但没有对比基线的，按 60 分处理——数字好看但说不清来由。
 
 ### 5. 稳定性成长性（权重 10%）
-职业发展轨迹和长期潜力
-- 跳槽频率：平均每段工作多长时间？一年一跳需要警惕
-- 成长斜率：从初级到高级的晋升速度？职责范围是否在扩大？
-- 学习能力：是否持续跟进新技术？GitHub、技术博客、开源贡献？
-- 职业规划：跳槽逻辑是否清晰？（比如从小公司到大厂，从传统到互联网）
+| 分数 | 标准 |
+|------|------|
+| 90-100 | 成长轨迹清晰（初级→高级/带人），每段 2-4 年，职责递增 |
+| 75-89  | 稳定但有瓶颈，或跳槽逻辑合理（每次跳有明确方向） |
+| 55-74  | 有一段很短（<1年）但整体可解释，或长期待在同一级别 |
+| 30-54  | 频繁跳槽（平均 <1.5 年/段），或职业方向反复横跳 |
+| 0-29   | 多段 <1 年且无合理解释，轨迹混乱 |
 
-## 输出格式（严格遵守 JSON，不要任何其他内容，不要 markdown 标记）
+## 输出格式
+
+返回纯 JSON（不含 ```json 标记，不含任何解释文字）：
+
 {
-  "技能匹配度": {
-    "score": 85,
-    "reason": "1-2句：具体掌握/缺失的技能，最突出的亮点。50-80字"
-  },
-  "经验相关性": {
-    "score": 70,
-    "reason": "1-2句：业务匹配度+项目规模，一句话说清。50-80字"
-  },
-  "学历匹配度": {
-    "score": 80,
-    "reason": "1-2句：学历专业+持续学习情况。50-80字"
-  },
-  "项目成果质量": {
-    "score": 65,
-    "reason": "1-2句：量化成果+项目影响力。50-80字"
-  },
-  "稳定性成长性": {
-    "score": 75,
-    "reason": "1-2句：跳槽频率+成长轨迹。50-80字"
-  },
-  "综合评语": "3-4句话：①核心优势（1个）②主要风险（1个）③推荐评级。100-150字",
-  "优势亮点": ["候选人最突出的2-3个优势，每条8-15字"],
-  "风险点": ["需要关注的2-3个潜在问题，每条8-15字"],
+  "技能匹配度": {"score": 82, "reason": "命中JD要求的Python、Flask、PostgreSQL、Docker四项核心技能，Flask有源码级理解（提到自定义中间件），但缺少Kubernetes经验。技能覆盖度约70%，深度中等偏上"},
+  "经验相关性": {"score": 68, "reason": "2年后端开发经验，做过内部管理系统（和JD的SaaS产品有一定相似度），但项目并发量低（日活2000），和JD要求的千万级用户产品有差距"},
+  "学历匹配度": {"score": 75, "reason": "四川农业大学（211）计算机本科，专业对口。无硕士学历但工作年限短（2年），在同届里属于中等偏上。无持续学习痕迹（GitHub/博客）是扣分项"},
+  "项目成果质量": {"score": 55, "reason": "提到客户流失模型准确率87%，有量化数据，但这个87%对比的是哪个基线？简历没写。内部管理系统无任何数据支撑，整体项目描述偏单薄"},
+  "稳定性成长性": {"score": 72, "reason": "只有一段工作经历（2年），无跳槽风险。但从简历看不出晋升或职责扩大的痕迹——2年始终是'Python开发工程师'"},
+  "综合评语": "【推荐评级：进入面试】技能栈匹配度高，Flask和PostgreSQL经验可直接复用。主要顾虑：①项目全是内部工具，缺乏高并发场景经验；②简历量化数据有水分嫌疑（缺基线对比）。建议一面重点考察数据库底层原理和系统设计能力。",
+  "优势亮点": ["Flask 源码级理解，有自定义中间件经验", "PostgreSQL 慢查询优化经验可复用", "211计算机科班，基础扎实"],
+  "风险点": ["无高并发/分布式系统经验", "项目量化数据缺失基线，含金量待验证", "2年无晋升，成长速度偏慢"],
   "面试建议": [
-    {"问题": "具体面试问题1", "考察点": "通过这个问题考察什么", "关注点": "好的回答应该包含什么"},
-    {"问题": "具体面试问题2", "考察点": "...", "关注点": "..."},
-    {"问题": "具体面试问题3", "考察点": "...", "关注点": "..."}
+    {"问题": "你说做了慢查询优化，能具体讲一个最复杂的优化案例吗？当时的执行计划长什么样？", "考察点": "PostgreSQL 真实深度——是真优化还是加了索引", "关注点": "能说出具体SQL、执行计划分析过程、优化前后对比数据"},
+    {"问题": "如果让你设计一个支持 100 万 DAU 的系统，你会怎么选型？考虑哪些方面？", "考察点": "系统设计能力，是否只停留在单机思维", "关注点": "提到水平扩展、缓存策略、数据库分库分表"),
+    {"问题": "过去2年为什么没有晋升？你觉得是机会问题还是能力问题？", "考察点": "自我认知是否清晰，成长意愿", "关注点": "不推卸责任，有明确的成长计划和自我反思"}
   ]
 }
 
-## 铁律
-- reason 必须点名具体技术/项目/数据，不能写"技术能力强"这种正确的废话
-- 信息缺失的地方诚实标注"简历未提及XX"，不要自己脑补
-- 应届生经验少不是错——评价标准应该是"在同届里什么水平"
-- 不要平权打分——有亮点的冲高分，明显不行的果断给低分"""
+## 铁律（违反一条则评分无效）
+
+1. reason 必须点名具体技术/项目/数据——"技术能力强"= 0分评语
+2. 信息缺失写"简历未提及XX"，严禁脑补。JD没写的要求不能作为扣分依据
+3. 应届生按"同届水平"评价，不按社招标准
+4. 分数必须拉开——同一批候选人，最高分和最低分至少差40分
+5. 综合评语的"推荐评级"必须是以下之一：【强烈推荐】【推荐进入面试】【可以面一下】【不推荐】
+6. 面试建议的"关注点"要给出具体的判断标准，不能只写"考察XX能力"""
 
 
 def build_prompt(jd_text, resume_text):
@@ -120,7 +141,7 @@ def build_prompt(jd_text, resume_text):
     - system = 不管用户说什么，这个角色设定始终不变
     - user   = 每次评分都不一样的内容（JD + 简历）
     """
-    user_message = f"""请对以下候选人进行评分：
+    user_message = f"""请对以下候选人进行评分。记住：你最大的价值是区分度——平庸的候选人必须得低分，优秀的必须得高分。如果所有人都 70-85 分，你的评分就没有意义。
 
 【岗位 JD】
 {jd_text.strip() or "（未提供岗位描述，请根据简历内容综合评估）"}
@@ -128,7 +149,7 @@ def build_prompt(jd_text, resume_text):
 【候选人简历】
 {resume_text.strip()}
 
-请严格按照 JSON 格式输出评分结果。"""
+请严格按照 JSON 格式输出评分结果，不要 markdown 包裹。"""
 
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -140,7 +161,7 @@ def build_prompt(jd_text, resume_text):
 # 2. 调用 DeepSeek API
 # =============================================================================
 
-def call_deepseek(messages, temperature=0.3):
+def call_deepseek(messages, temperature=0.2):
     """调用 DeepSeek Chat API，返回 AI 的文本回复。
 
     参数:
@@ -178,24 +199,21 @@ def call_deepseek(messages, temperature=0.3):
             print(f"[ERROR] API 返回错误 {response.status_code}: {response.text[:200]}")
             return None
 
-        # 解析返回的 JSON，提取 AI 的实际回复
+        # 解析返回的 JSON，提取 AI 的实际回复 + token 用量
         data = response.json()
-        # data 的结构：
-        # {
-        #   "choices": [{"message": {"content": "AI的回复文本", "role": "assistant"}}],
-        #   "usage": {"prompt_tokens": 500, "completion_tokens": 200, ...}
-        # }
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
+        usage = data.get("usage", {})
+        return content, usage
 
     except requests.exceptions.Timeout:
         print("[ERROR] API 请求超时（60秒），检查网络或稍后重试")
-        return None
+        return None, None
     except requests.exceptions.ConnectionError:
         print("[ERROR] 无法连接 DeepSeek API，检查网络")
-        return None
+        return None, None
     except Exception as e:
         print(f"[ERROR] API 调用异常: {e}")
-        return None
+        return None, None
 
 
 def call_deepseek_stream(messages, temperature=0.5):
@@ -403,11 +421,18 @@ def score_resume(jd_text, resume_text):
     messages = build_prompt(jd_text, resume_text)
 
     # Step 2: 调用 API
-    raw_response = call_deepseek(messages)
+    raw_response, usage = call_deepseek(messages)
 
     if raw_response is None:
         result["error"] = "AI 接口调用失败，请检查网络或 API Key"
         return result
+
+    if usage:
+        result["tokens_used"] = {
+            "prompt": usage.get("prompt_tokens", 0),
+            "completion": usage.get("completion_tokens", 0),
+            "total": usage.get("total_tokens", 0),
+        }
 
     # Step 3: 解析 JSON
     scores = parse_response(raw_response)
@@ -469,10 +494,22 @@ def _build_scores_context(scores_context):
     return str(scores_context)
 
 
-def _build_followup_user_message(resume_text, jd_text, scores_context, question, markdown=False):
+def _build_followup_user_message(resume_text, jd_text, scores_context, question, history=None, markdown=False):
     """构建追问的 user message（ask_followup 和 ask_followup_stream 共用）。"""
     ctx_text = _build_scores_context(scores_context)
     md_hint = "请用 Markdown 格式组织回答。" if markdown else ""
+
+    # 对话历史——让 AI 知道之前问了什么、答了什么
+    history_text = ""
+    if history and len(history) > 0:
+        # 只保留最近 3 轮，历史太长分散注意力
+        recent = history[-3:]
+        history_text = "\n".join(
+            f"第{i+1}轮追问: {h['q']}\n第{i+1}轮回答: {h['a'][:300]}"
+            for i, h in enumerate(recent)
+        )
+        history_text = f"\n【对话历史】\n{history_text}\n"
+
     return f"""以下是候选人的简历内容和之前的评分结果：
 
 【评分结果】
@@ -483,26 +520,29 @@ def _build_followup_user_message(resume_text, jd_text, scores_context, question,
 
 【简历原文】
 {resume_text.strip()}
-
+{history_text}
 【面试官的追问】
 {question}
 
-请基于以上信息回答。如果简历中没有相关内容，诚实告知并给出面试建议。{md_hint}"""
+请基于以上信息回答。如果对话历史中有相关上下文，请结合历史给出连贯回答。如果简历中没有相关内容，诚实告知并给出面试建议。{md_hint}"""
 
 
-def ask_followup(resume_text, jd_text, scores_context, question):
+def ask_followup(resume_text, jd_text, scores_context, question, history=None):
     """基于简历内容和评分结果，回答关于候选人的追问。"""
-    user_message = _build_followup_user_message(resume_text, jd_text, scores_context, question)
+    user_message = _build_followup_user_message(resume_text, jd_text, scores_context, question, history)
     messages = [
         {"role": "system", "content": FOLLOWUP_SYSTEM_PROMPT},
         {"role": "user", "content": user_message},
     ]
-    return call_deepseek(messages, temperature=0.5)
+    result = call_deepseek(messages, temperature=0.5)
+    if isinstance(result, tuple):
+        return result[0]  # strip usage for non-stream
+    return result
 
 
-def ask_followup_stream(resume_text, jd_text, scores_context, question):
+def ask_followup_stream(resume_text, jd_text, scores_context, question, history=None):
     """流式版本——逐 token yield，用于 SSE 推送到前端。"""
-    user_message = _build_followup_user_message(resume_text, jd_text, scores_context, question, markdown=True)
+    user_message = _build_followup_user_message(resume_text, jd_text, scores_context, question, history, markdown=True)
     messages = [
         {"role": "system", "content": FOLLOWUP_SYSTEM_PROMPT},
         {"role": "user", "content": user_message},
@@ -550,6 +590,10 @@ if __name__ == "__main__":
 
     if result["success"]:
         print(f"总分: {result['total_score']}")
+        if result.get("tokens_used"):
+            print(f"Token 用量: prompt={result['tokens_used'].get('prompt',0)}, "
+                  f"completion={result['tokens_used'].get('completion',0)}, "
+                  f"total={result['tokens_used'].get('total',0)}")
         print()
         for dim, data in result["scores"].items():
             bar = "#" * (data["score"] // 5) + "-" * (20 - data["score"] // 5)

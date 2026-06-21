@@ -10,7 +10,7 @@
       <p style="font-size:var(--text-sm);color:var(--text-tertiary);margin-top:4px;">招聘管道全貌与人才洞察</p>
     </div>
     <div style="margin-left:auto;display:flex;gap:var(--space-2);">
-      <button onclick="openCardConfig()" class="btn btn-ghost btn-sm" data-tilt>📊 自定义</button>
+      <button onclick="openCardConfig()" class="btn btn-ghost btn-sm">📊 自定义</button>
       <button id="btn-ai-analyze" class="btn btn-primary btn-sm" onclick="runAIAnalysis()">🤖 AI 诊断</button>
     </div>
   </div>
@@ -234,6 +234,18 @@ document.body.addEventListener('htmx:afterSettle', function(evt) {
 });
 initAnalytics();
 
+// 图表自适应窗口缩放（debounce 300ms）
+let _resizeTimer;
+window.addEventListener('resize', function() {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(function() {
+    if (window.location.pathname === '/analytics' && adata && stages.length) {
+      renderFunnel(); renderDegree(); renderSource();
+      renderSchool(); renderCompany();
+    }
+  }, 300);
+}, { passive: true });
+
 function initAnalytics() {
   if (_analyticsInited && adata && stages.length) return;
   _analyticsInited = true;
@@ -318,7 +330,7 @@ function renderStats() {
       sub = toCount + ' / ' + fromCount + ' 人';
     }
 
-    return '<div class="stat-card" data-tilt onclick="editCard(' + idx + ')" title="点击配置此卡片">' +
+    return '<div class="stat-card" onclick="editCard(' + idx + ')" title="点击配置此卡片">' +
       '<span class="card-edit-hint">⚙</span>' +
       '<div class="stat-icon">' + escHtml(cfg.icon || '📊') + '</div>' +
       '<p class="stat-value">' + value + '</p>' +

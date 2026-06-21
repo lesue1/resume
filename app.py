@@ -37,17 +37,31 @@ class OCRService:
     def __init__(self):
         self.available = False
         self.error = ""
-        self._tesseract_exe = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        self._tesseract_exe = None
         self._tessdata_dir = ""
         try:
             from PIL import Image
             import os as _os
+            import shutil as _shutil
             self.Image = Image
-            if not _os.path.exists(self._tesseract_exe):
-                self.error = f"Tesseract 未安装（{self._tesseract_exe} 不存在）"
+            # 先查 PATH 里的 tesseract，找不到再用常见路径兜底
+            exe = _shutil.which("tesseract")
+            if exe:
+                self._tesseract_exe = exe
+            elif _os.path.exists(r"C:\Program Files\Tesseract-OCR\tesseract.exe"):
+                self._tesseract_exe = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+            elif _os.path.exists(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"):
+                self._tesseract_exe = r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"
+            elif _os.path.exists("/usr/bin/tesseract"):
+                self._tesseract_exe = "/usr/bin/tesseract"
+            elif _os.path.exists("/usr/local/bin/tesseract"):
+                self._tesseract_exe = "/usr/local/bin/tesseract"
             else:
-                self._tessdata_dir = _os.path.expanduser(r"~/.tesseract/tessdata")
-                self.available = True
+                self.error = "Tesseract 未安装"
+                return
+            # tessdata 优先用环境变量，其次用可执行文件旁边的路径
+            self._tessdata_dir = _os.environ.get("TESSDATA_PREFIX", "")
+            self.available = True
         except ImportError:
             self.error = "缺少 Pillow 模块，请运行 pip install Pillow"
 
@@ -197,6 +211,8 @@ def api_jobs_list():
 def api_jobs_save():
     """创建或更新岗位。"""
     data = request.get_json()
+    if data is None:
+        return jsonify({"success": False, "error": "请求格式错误，需要 JSON"}), 400
     try:
         save_job(
             title=data.get("title", "").strip(),
@@ -239,6 +255,8 @@ def api_stages():
 def api_stages_save():
     """新建或更新阶段。"""
     data = request.get_json()
+    if data is None:
+        return jsonify({"success": False, "error": "请求格式错误"}), 400
     try:
         save_stage(
             stage_id=data.get("id"),
@@ -255,6 +273,8 @@ def api_stages_save():
 def api_stages_reorder():
     """批量排序。"""
     data = request.get_json()
+    if data is None:
+        return jsonify({"success": False, "error": "请求格式错误"}), 400
     try:
         reorder_stages(data.get("order", []))
         return jsonify({"success": True})
@@ -338,7 +358,7 @@ def api_score():
     if not result["success"]:
         return f"<div class='error'>{result['error']}</div>"
 
-    # 保存到数据库
+    # 保存到 evaluations 表
     try:
         save_evaluation(
             name=request.form.get("candidate_name", "未知"),
@@ -349,10 +369,31 @@ def api_score():
             scores_dict=result["scores"],
             jd_text=jd_text,
             resume_text=resume_text,
+            token_info=result.get("tokens_used"),
         )
     except Exception as e:
         print(f"[WARN] 保存评估记录失败: {e}")
         result["save_error"] = str(e)
+
+    # 同步写入简历库（resumes 表），让数据分析和简历列表能查到
+    try:
+        import uuid
+        cand_name = request.form.get("candidate_name", "").strip()
+        resume_data = {
+            "unique_code": f"EVAL-{uuid.uuid4().hex[:8].upper()}",
+            "name": cand_name or "未知",
+            "email": request.form.get("email", "").strip(),
+            "phone": request.form.get("phone", "").strip(),
+            "resume_text": resume_text,
+            "target_position": request.form.get("job_title", "").strip(),
+            "interview_status": "筛选",
+            "source": "AI评估",
+            "tech_direction": "",
+            "skills": json.dumps(result.get("highlights", []), ensure_ascii=False),
+        }
+        save_resume(resume_data)
+    except Exception as e:
+        print(f"[WARN] 同步简历库失败: {e}")
 
     return render_template("_score_card_v2.html", result=result)
 
@@ -361,10 +402,14 @@ def api_score():
 def api_followup():
     """评分后追问——SSE 流式返回 AI 回答。"""
     data = request.get_json()
+    if data is None:
+        return jsonify({"success": False, "error": "请求格式错误"}), 400
+
     resume_text = data.get("resume_text", "")
     jd_text = data.get("jd_text", "")
     question = data.get("question", "")
     scores_context = data.get("scores", {})
+    history = data.get("history", [])  # 前几轮对话: [{"q":"...","a":"..."}, ...]
 
     if not resume_text.strip():
         return jsonify({"success": False, "error": "缺少简历内容"})
@@ -375,13 +420,10 @@ def api_followup():
     def generate():
         """SSE 生成器——把 DeepSeek 流式 token 包装成 SSE 格式。"""
         try:
-            for chunk in ask_followup_stream(resume_text, jd_text, scores_context, question):
+            for chunk in ask_followup_stream(resume_text, jd_text, scores_context, question, history):
                 if chunk is None:
                     break
-                # SSE 格式: data: <内容>\n\n
-                # 每个 chunk 是一段文本，用 JSON 包装防止特殊字符干扰
                 yield f"data: {json.dumps({'token': chunk})}\n\n"
-            # 发送结束信号
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -494,6 +536,8 @@ def api_resumes_list():
 def api_resume_status():
     """更新面试状态。"""
     data = request.get_json()
+    if data is None:
+        return jsonify({"success": False, "error": "请求格式错误"}), 400
     try:
         update_status(data["id"], data["status"])
         return jsonify({"success": True})
@@ -505,6 +549,8 @@ def api_resume_status():
 def api_resume_delete():
     """删除简历。"""
     data = request.get_json()
+    if data is None:
+        return jsonify({"success": False, "error": "请求格式错误"}), 400
     try:
         delete_resume(data["id"])
         return jsonify({"success": True})
@@ -514,10 +560,19 @@ def api_resume_delete():
 
 @app.route("/api/resumes/export")
 def api_resumes_export():
-    """导出简历库为 CSV。"""
-    df = get_resumes()
+    """导出简历库为 CSV（跟随当前筛选条件）。"""
+    status_filter = request.args.get("status", "")
+    search = request.args.get("search", "")
+    degree = request.args.get("degree", "")
+    direction = request.args.get("direction", "")
+
+    df = get_resumes(
+        status_filter=status_filter,
+        search=search,
+        degree=degree,
+        direction=direction,
+    )
     output = io.StringIO()
-    # 去掉可能超长的文本列
     export_df = df.drop(columns=['resume_text', 'scores_json'], errors='ignore')
     export_df.to_csv(output, index=False, encoding='utf-8-sig')
     output.seek(0)
@@ -606,6 +661,8 @@ def api_analytics_ai_summary():
             {"role": "user", "content": prompt},
         ]
         result = call_deepseek(messages, temperature=0.5)
+        if isinstance(result, tuple):
+            result = result[0]  # strip usage info for analytics
         if result:
             return jsonify({"success": True, "analysis": result})
         return jsonify({"success": False, "error": "AI 调用失败"})

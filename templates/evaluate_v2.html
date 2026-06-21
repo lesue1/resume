@@ -153,19 +153,19 @@ function handlePDF(file) {
     .then(r => r.json())
     .then(data => {
       zone.style.opacity = '1'; zone.style.pointerEvents = 'auto';
-      if (!data.success) { alert('解析失败: ' + data.error); return; }
+      if (!data.success) { toast('解析失败: ' + data.error, 'error'); return; }
       setResumeText(data.text);
     })
     .catch(err => {
       zone.style.opacity = '1'; zone.style.pointerEvents = 'auto';
-      alert('网络错误: ' + err.message);
+      toast('网络错误: ' + err.message, 'error');
     });
 }
 
 // ── 粘贴文字 ──
 function usePastedText() {
   const text = document.getElementById('paste-textarea').value.trim();
-  if (!text) { alert('请先粘贴简历文字'); return; }
+  if (!text) { toast('请先粘贴简历文字', 'info'); return; }
   setResumeText(text);
 }
 
@@ -238,9 +238,26 @@ function loadJob(jobId) {
 // ── AI 评分 ──
 function startScoring() {
   const resumeText = document.getElementById('resume-text').value;
-  if (!resumeText.trim()) { alert('请先输入简历内容'); return; }
+  if (!resumeText.trim()) { toast('请先输入简历内容', 'info'); return; }
 
-  document.getElementById('score-panel').innerHTML = '<div class="card" style="text-align:center;padding:var(--space-10) var(--space-6);"><div style="font-size:2rem;margin-bottom:var(--space-2);">⏳</div><p style="color:var(--text-tertiary);">AI 正在分析简历...</p></div>';
+  document.getElementById('score-panel').innerHTML = `
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-5);">
+        <div class="skeleton" style="width:72px;height:72px;border-radius:50%;"></div>
+        <div style="flex:1;">
+          <div class="skeleton" style="width:60%;height:24px;margin-bottom:8px;"></div>
+          <div class="skeleton" style="width:40%;height:16px;"></div>
+        </div>
+      </div>
+      <div style="display:grid;gap:var(--space-3);">
+        <div class="skeleton" style="height:20px;width:100%;"></div>
+        <div class="skeleton" style="height:20px;width:90%;"></div>
+        <div class="skeleton" style="height:20px;width:80%;"></div>
+        <div class="skeleton" style="height:20px;width:85%;"></div>
+        <div class="skeleton" style="height:20px;width:70%;"></div>
+      </div>
+      <p style="color:var(--text-tertiary);text-align:center;font-size:var(--text-sm);margin-top:var(--space-4);">AI 正在分析简历，大约需要 5-10 秒...</p>
+    </div>`;
 
   const fd = new FormData();
   fd.append('resume_text', resumeText);
@@ -269,7 +286,9 @@ function startScoring() {
     });
 }
 
-// ── 追问（SSE 流式）──
+// ── 追问（SSE 流式，带对话记忆 + 超时）──
+window._chatHistory = [];
+
 function sendFollowup() {
   const input = document.getElementById('chat-input');
   const question = input.value.trim();
@@ -278,14 +297,17 @@ function sendFollowup() {
   const messagesDiv = document.getElementById('chat-messages');
   const loadingDiv = document.getElementById('chat-loading');
 
-  messagesDiv.innerHTML += '<div style="margin-bottom:var(--space-3);"><div style="font-weight:600;color:var(--accent);font-size:var(--text-sm);">👤 你</div><div class="ai-bubble" style="background:var(--accent-light);">' + escapeHtml(question) + '</div></div>';
+  messagesDiv.innerHTML += '<div style="margin-bottom:var(--space-3);"><div style="font-weight:600;color:var(--accent);font-size:var(--text-sm);">你</div><div class="ai-bubble" style="background:var(--accent-light);">' + escapeHtml(question) + '</div></div>';
 
   const replyId = 'reply-' + Date.now();
-  messagesDiv.innerHTML += '<div style="margin-bottom:var(--space-3);" id="' + replyId + '"><div style="font-weight:600;color:var(--green);font-size:var(--text-sm);">🤖 AI 面试官</div><div class="ai-bubble"><span class="typing-cursor">&nbsp;</span></div></div>';
+  messagesDiv.innerHTML += '<div style="margin-bottom:var(--space-3);" id="' + replyId + '"><div style="font-weight:600;color:var(--green);font-size:var(--text-sm);">AI 面试官</div><div class="ai-bubble"><span class="typing-cursor">&nbsp;</span></div></div>';
 
   messagesDiv.scrollTop = messagesDiv.scrollHeight;
   input.value = '';
   loadingDiv.style.display = 'block';
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => { controller.abort(); }, 30000);
 
   fetch('/api/followup', {
     method: 'POST',
@@ -295,9 +317,12 @@ function sendFollowup() {
       jd_text: window._lastJDText || '',
       question: question,
       scores: window._lastScoreData || {},
-    })
+      history: window._chatHistory || [],
+    }),
+    signal: controller.signal,
   }).then(response => {
     if (!response.ok) throw new Error('HTTP ' + response.status);
+    clearTimeout(timeout);
     loadingDiv.style.display = 'none';
 
     const reader = response.body.getReader();
@@ -308,7 +333,10 @@ function sendFollowup() {
 
     function processStream() {
       reader.read().then(({ done, value }) => {
-        if (done) return;
+        if (done) {
+          window._chatHistory.push({ q: question, a: fullText });
+          return;
+        }
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
@@ -316,26 +344,48 @@ function sendFollowup() {
           if (!line.startsWith('data: ')) continue;
           try {
             const parsed = JSON.parse(line.slice(6));
-            if (parsed.done) return;
+            if (parsed.done) {
+              window._chatHistory.push({ q: question, a: fullText });
+              return;
+            }
             if (parsed.error) { bubble.innerHTML = '<span style="color:var(--red);">请求失败: ' + parsed.error + '</span>'; return; }
             if (parsed.token) { fullText += parsed.token; bubble.innerHTML = renderMarkdown(fullText); }
           } catch(e) {}
         }
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
         processStream();
+      }).catch(() => {
+        if (!fullText) bubble.innerHTML = '<span style="color:var(--orange);">请求超时或中断</span>';
       });
     }
     processStream();
   }).catch(err => {
+    clearTimeout(timeout);
     loadingDiv.style.display = 'none';
-    document.querySelector('#' + replyId + ' .ai-bubble').innerHTML = '<span style="color:var(--red);">请求失败: ' + err.message + '</span>';
+    const msg = err.name === 'AbortError' ? '请求超时（30秒）' : err.message;
+    document.querySelector('#' + replyId + ' .ai-bubble').innerHTML = '<span style="color:var(--red);">' + msg + '</span>';
   });
 }
 
 function renderMarkdown(text) {
   let html = escapeHtml(text);
+  // 代码块
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre style="background:var(--surface);padding:var(--space-3);border-radius:var(--radius-sm);overflow-x:auto;font-size:var(--text-xs);"><code>$2</code></pre>');
+  // 行内代码
+  html = html.replace(/`([^`]+)`/g, '<code style="background:var(--surface);padding:1px 6px;border-radius:4px;font-size:var(--text-xs);">$1</code>');
+  // 粗体
   html = html.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-  html = html.replace(/^- (.+)$/gm, '<span style="display:block;padding-left:var(--space-3);">• $1</span>');
+  // 链接
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--accent);">$1</a>');
+  // 标题
+  html = html.replace(/^### (.+)$/gm, '<h4 style="margin:var(--space-3) 0 var(--space-2);font-size:var(--text-base);">$1</h4>');
+  html = html.replace(/^## (.+)$/gm, '<h3 style="margin:var(--space-4) 0 var(--space-2);font-size:var(--text-lg);">$1</h3>');
+  // 无序列表
+  html = html.replace(/^[\-\*] (.+)$/gm, '<span style="display:block;padding-left:var(--space-3);">• $1</span>');
+  // 有序列表
+  html = html.replace(/^\d+\. (.+)$/gm, '<span style="display:block;padding-left:var(--space-3);">$1</span>');
+  // 换行
+  html = html.replace(/\n\n/g, '<br><br>');
   html = html.replace(/\n/g, '<br>');
   return html;
 }

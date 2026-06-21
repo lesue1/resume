@@ -244,17 +244,44 @@ setupDragDrop('drop-zone', handlePDF);
 setupDragDrop('img-zone', handleImage);
 
 // ── 加载岗位列表 ──
-fetch('/api/jobs/list?format=json')
-  .then(r => r.json())
-  .then(jobs => {
-    const sel = document.getElementById('job-selector');
-    jobs.forEach(j => {
-      const opt = document.createElement('option');
-      opt.value = j.id;
-      opt.textContent = j.title;
-      sel.appendChild(opt);
+function loadJobList() {
+  var sel = document.getElementById('job-selector');
+  if (!sel) return;  // DOM 还没就绪
+  // 清空旧选项（保留第一个占位项）
+  while (sel.options.length > 1) sel.remove(1);
+
+  fetch('/api/jobs/list?format=json')
+    .then(function(r) { return r.json(); })
+    .then(function(jobs) {
+      if (!Array.isArray(jobs)) return;
+      jobs.forEach(function(j) {
+        var opt = document.createElement('option');
+        opt.value = j.id;
+        opt.textContent = j.title;
+        sel.appendChild(opt);
+      });
+    })
+    .catch(function(err) {
+      console.error('加载岗位失败:', err);
     });
+}
+
+// HTMX 切换页面后重新加载；首次加载用 MutationObserver 兜底
+document.body.addEventListener('htmx:afterSettle', function() {
+  if (document.getElementById('job-selector')) loadJobList();
+});
+if (document.getElementById('job-selector')) {
+  loadJobList();
+} else {
+  // DOM 可能还没渲染完，等 MutationObserver
+  var _obs = new MutationObserver(function() {
+    if (document.getElementById('job-selector')) {
+      loadJobList();
+      _obs.disconnect();
+    }
   });
+  _obs.observe(document.body, { childList: true, subtree: true });
+}
 
 function loadJob(jobId) {
   if (!jobId) return;

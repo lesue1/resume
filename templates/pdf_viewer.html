@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ name }} - 简历附件</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a1e; height: 100vh; display: flex; flex-direction: column; }
+  .toolbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 20px; background: #252528; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif;
+    flex-shrink: 0;
+  }
+  .toolbar a, .toolbar button {
+    color: #ccc; text-decoration: none; font-size: 14px;
+    background: none; border: 0.5px solid #555; border-radius: 6px;
+    padding: 6px 14px; cursor: pointer; transition: 0.15s;
+  }
+  .toolbar a:hover, .toolbar button:hover { background: #444; color: #fff; }
+  .toolbar .title { font-weight: 600; font-size: 15px; flex: 1; }
+  .toolbar .back { color: #4da3ff; border-color: #4da3ff; }
+  .viewer { flex: 1; width: 100%; border: none; }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <a href="/resumes" class="back">← 返回简历库</a>
+  <span class="title">{{ name }} - 简历附件</span>
+  <a href="{{ file_url }}" download="{{ name }}_简历.pdf">下载</a>
+  <a href="{{ file_url }}" target="_blank">新窗口打开</a>
+</div>
+<iframe src="{{ file_url }}#toolbar=0" class="viewer"></iframe>
+</body>
+</html>

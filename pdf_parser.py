@@ -10,6 +10,7 @@ pdf_parser.py — PDF 文本提取
 文字 PDF 一行 get_text() 搞定；扫描 PDF（图片）得 OCR，这个文件不涉及。
 """
 
+import os
 import fitz  # PyMuPDF 的导入名是 fitz，历史原因
 
 
@@ -54,8 +55,58 @@ def extract_text(filepath) -> str:
         if doc is not None:
             doc.close()
 
-    return "\n\n".join(text_parts)  # 两页之间用两个换行隔开，保留分页感
+    return "\n\n".join(text_parts)
 
+
+def extract_text_docx(filepath) -> str:
+    """从 Word (.docx) 文件提取文字（含表格、文本框、页眉页脚）。"""
+    from docx import Document
+    doc = Document(filepath)
+    parts = []
+    # 正文段落
+    for p in doc.paragraphs:
+        t = p.text.strip()
+        if t:
+            parts.append(t)
+    # 表格
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+            if row_text:
+                parts.append(row_text)
+    # 页眉页脚
+    for section in doc.sections:
+        for p in section.header.paragraphs:
+            t = p.text.strip()
+            if t: parts.append(t)
+        for p in section.footer.paragraphs:
+            t = p.text.strip()
+            if t: parts.append(t)
+
+    # 兜底：从底层 XML 提取文字（抓文本框/形状/内容控件里的内容）
+    if not parts:
+        ns = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+        body = doc.element.body
+        for p_elem in body.iter(f'{ns}p'):
+            p_text = ''.join(t.text or '' for t in p_elem.iter(f'{ns}t'))
+            if p_text.strip():
+                parts.append(p_text.strip())
+
+    return "\n\n".join(parts)
+
+
+
+# =============================================================================
+# 通用提取入口
+# =============================================================================
+
+def extract_resume_text(file_obj, filename=""):
+    """统一入口：根据文件后缀自动选择 PDF 或 Word 解析。"""
+    ext = os.path.splitext(filename)[-1].lower()
+    if ext == '.docx':
+        return extract_text_docx(file_obj)
+    else:
+        return extract_text(file_obj)
 
 
 # =============================================================================

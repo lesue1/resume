@@ -40,43 +40,160 @@
       <option value="安全">安全</option>
     </select>
 
+    <button onclick="document.getElementById('import-file-input').click()" class="btn btn-primary btn-sm">📥 导入简历</button>
+    <input type="file" id="import-file-input" accept=".pdf,.docx" style="display:none;" onchange="importResume(this.files[0])">
     <a id="export-link" href="/api/resumes/export" class="btn btn-secondary btn-sm">CSV 导出</a>
     <span id="search-indicator" class="htmx-indicator" style="color:var(--text-tertiary);font-size:var(--text-xs);">搜索中...</span>
   </div>
 </div>
 
-<!-- 简历列表 -->
+<!-- 简历网格 -->
 <div id="resume-list" hx-get="/api/resumes/list" hx-trigger="load" hx-swap="innerHTML">
   <p class="loading">加载中...</p>
 </div>
 
+<!-- 评估历史弹窗 -->
+<div id="eval-modal" style="display:none;" onclick="closeEvalModal()">
+  <div class="file-modal-overlay">
+    <div class="file-modal-card" style="max-width:700px;" onclick="event.stopPropagation()">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-4);">
+        <span style="font-weight:600;font-size:var(--text-lg);">📋 历史评估记录</span>
+        <button onclick="closeEvalModal()" class="btn btn-ghost btn-sm">✕</button>
+      </div>
+      <div id="eval-modal-body" style="min-height:200px;text-align:center;color:var(--text-tertiary);">
+        加载中...
+      </div>
+    </div>
+  </div>
+</div>
+
 <style>
+  /* ── 网格布局 ── */
+  #resume-list {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-4);
+    margin-top: var(--space-4);
+  }
+  @media (min-width: 1500px) { #resume-list { grid-template-columns: repeat(4, 1fr); } }
+  @media (max-width: 1000px) { #resume-list { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 640px)  { #resume-list { grid-template-columns: 1fr; } }
+
+  /* ── 卡片 ── */
   .resume-card {
-    background: var(--bg); border-radius: var(--radius-md);
-    padding: var(--space-5) var(--space-6); margin-bottom: var(--space-3);
+    background: var(--bg);
+    border-radius: var(--radius-md);
+    padding: var(--space-5);
     border: 0.5px solid var(--border);
     box-shadow: var(--shadow-sm);
     transition: all 0.2s ease;
+    cursor: default;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
   }
   .resume-card:hover {
     box-shadow: var(--shadow-md);
-    border-color: var(--border-hover);
-    transform: translateY(-1px);
+    border-color: var(--accent);
+    transform: translateY(-2px);
   }
-  .rc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2); }
-  .rc-name { font-weight: 600; font-size: var(--text-base); letter-spacing: var(--tracking-tight); }
-  .rc-body { font-size: var(--text-sm); color: var(--text-secondary); }
-  .rc-row { margin-bottom: 3px; }
-  .rc-skills { margin-top: var(--space-2); }
-  .rc-footer { display: flex; justify-content: space-between; align-items: center; margin-top: var(--space-3); font-size: var(--text-xs); color: var(--text-tertiary); }
-  .rc-actions { display: flex; gap: var(--space-2); align-items: center; }
-  .status-select { width: auto; padding: 4px 8px; font-size: var(--text-xs); border-radius: var(--radius-sm); border: 0.5px solid var(--border); }
+  .resume-card.has-file { cursor: pointer; }
+  .rc-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .rc-name {
+    font-weight: 600; font-size: var(--text-base);
+    letter-spacing: var(--tracking-tight);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+  }
+  .rc-badges {
+    display: flex; align-items: center; gap: 6px;
+    flex-shrink: 0; margin-left: var(--space-2);
+  }
+  .rc-status-badge {
+    font-size: 11px; font-weight: 600; white-space: nowrap;
+    padding: 2px 10px; border-radius: 20px;
+    letter-spacing: 0.02em; flex-shrink: 0;
+  }
+  .rc-file-badge {
+    flex-shrink: 0;
+    font-size: 0.8rem; opacity: 0.5; cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .rc-file-badge:hover { opacity: 1; }
+  .rc-info { font-size: var(--text-xs); color: var(--text-secondary); line-height: 1.6; }
+  .rc-info-row { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rc-skills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+  .tag-xs {
+    display: inline-block; background: var(--surface); color: var(--text-secondary);
+    padding: 2px 8px; border-radius: var(--radius-sm); font-size: 11px;
+    border: 0.5px solid var(--border); white-space: nowrap;
+  }
+  .rc-footer {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: auto; padding-top: var(--space-3);
+    border-top: 0.5px solid var(--border);
+    font-size: 11px; color: var(--text-tertiary);
+    gap: var(--space-2);
+  }
+  .rc-actions {
+    display: flex; gap: 6px; align-items: center;
+    flex-shrink: 0;
+  }
+  .status-select {
+    width: auto; padding: 4px 6px; font-size: 11px;
+    border-radius: var(--radius-sm); border: 0.5px solid var(--border);
+    background: var(--bg); max-width: 72px;
+  }
+  .btn-xs {
+    padding: 4px 10px; font-size: 12px; white-space: nowrap;
+    border-radius: var(--radius-sm); border: 0.5px solid var(--border);
+    background: none; cursor: pointer; color: var(--red); transition: 0.15s;
+  }
+  .btn-xs:hover { background: var(--red); color: #fff; border-color: var(--red); }
+
+  /* ── PDF 弹窗 ── */
+  .file-modal-overlay {
+    position: fixed; inset: 0; z-index: 500;
+    background: rgba(0,0,0,0.3); backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center;
+    animation: fadeIn 0.2s ease;
+  }
+  .file-modal-card {
+    background: var(--bg); border-radius: var(--radius-lg);
+    padding: var(--space-6); width: 90vw; max-width: 800px; max-height: 85vh;
+    box-shadow: var(--shadow-xl); overflow-y: auto;
+    animation: scaleIn 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    border: 0.5px solid var(--border);
+  }
+  #eval-modal {
+    position: fixed; inset: 0; z-index: 500;
+    display: none; align-items: center; justify-content: center;
+  }
+
+  /* ── 评估记录 ── */
+  .eval-record {
+    background: var(--surface); border-radius: var(--radius-md);
+    padding: var(--space-4); margin-bottom: var(--space-3);
+    border: 0.5px solid var(--border);
+    transition: box-shadow 0.15s;
+  }
+  .eval-record:hover { box-shadow: var(--shadow-sm); }
+  .eval-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2); }
+  .eval-job { font-weight: 600; font-size: var(--text-sm); }
+  .eval-total { font-size: var(--text-lg); font-weight: 700; }
+  .eval-dim-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: var(--text-xs); }
+  .eval-dim-name { color: var(--text-secondary); min-width: 80px; }
+  .eval-dim-bar { flex: 1; height: 6px; background: var(--border); border-radius: 3px; margin: 0 var(--space-2); overflow: hidden; }
+  .eval-dim-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+  .eval-dim-score { font-weight: 600; min-width: 32px; text-align: right; }
+  .eval-empty { text-align: center; padding: var(--space-8); color: var(--text-tertiary); }
 </style>
 
 <script>
 // ── 动态加载阶段到筛选下拉 ──
 fetch('/api/stages').then(r => r.json()).then(stages => {
   const sel = document.getElementById('filter-status');
+  if (!sel) return;
   stages.forEach(s => {
     const opt = document.createElement('option');
     opt.value = s.name;
@@ -95,31 +212,76 @@ function changeStatus(id, status) {
   })
   .then(res => res.json())
   .then(data => {
-    if (data.success) {
-      htmx.trigger('#resume-list', 'refresh-list');
-    } else {
-      toast('更新失败: ' + data.error, 'error');
-    }
+    if (data.success) htmx.trigger('#resume-list', 'refresh-list');
+    else toast('更新失败: ' + data.error, 'error');
   });
 }
 
 // ── 删除 ──
-function deleteCard(id) {
-  if (!confirm('确认删除这条简历？')) return;
-  fetch('/api/resumes/delete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: id })
-  })
-  .then(res => res.json())
-  .then(data => {
-    if (data.success) {
-      toast('已删除', 'success');
-      htmx.trigger('#resume-list', 'refresh-list');
-    } else {
-      toast('删除失败: ' + (data.error || '未知错误'), 'error');
+function deleteCard(id, e) {
+  if (!e) e = window.event;
+  var btn = e.target;
+  if (btn._confirmId === id) {
+    btn._confirmId = null;
+    btn.textContent = '删';
+    btn.style.color = '';
+    btn.style.background = '';
+    fetch('/api/resumes/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) { toast('已删除', 'success'); htmx.trigger('#resume-list', 'refresh-list'); }
+      else toast('删除失败: ' + (data.error || '未知错误'), 'error');
+    });
+    return;
+  }
+  btn._confirmId = id;
+  btn.textContent = '确认?';
+  btn.style.color = '#fff';
+  btn.style.background = 'var(--red)';
+  toast('再次点击确认删除', 'info');
+  setTimeout(function() {
+    if (btn._confirmId === id) {
+      btn._confirmId = null;
+      btn.textContent = '删';
+      btn.style.color = '';
+      btn.style.background = '';
     }
-  });
+  }, 3000);
+}
+
+// ── 导入简历 ──
+function importResume(file) {
+  if (!file) return;
+  var btn = document.querySelector('.btn-primary');
+  var origText = btn.textContent;
+  btn.textContent = '⏳ 导入中...';
+  btn.disabled = true;
+
+  var fd = new FormData();
+  fd.append('file', file);
+  fetch('/api/resumes/import', { method: 'POST', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      btn.textContent = origText;
+      btn.disabled = false;
+      if (data.success) {
+        toast('已导入: ' + data.name + ' (' + data.length + ' 字)', 'success');
+        htmx.trigger('#resume-list', 'refresh-list');
+      } else {
+        toast('导入失败: ' + (data.error || '未知错误'), 'error');
+      }
+    })
+    .catch(function(err) {
+      btn.textContent = origText;
+      btn.disabled = false;
+      toast('网络错误: ' + err.message, 'error');
+    });
+  // 重置 input 以支持重复选择同一文件
+  document.getElementById('import-file-input').value = '';
 }
 
 // ── 导出链接跟随筛选 ──
@@ -135,15 +297,27 @@ function updateExportLink() {
   if (direction) params.set('direction', direction);
   document.getElementById('export-link').href = '/api/resumes/export?' + params.toString();
 }
-// 监听筛选变化
 ['input[name="search"]', 'select[name="status"]', 'select[name="degree"]', 'select[name="direction"]'].forEach(sel => {
   const el = document.querySelector(sel);
   if (el) el.addEventListener('change', updateExportLink);
 });
 document.querySelector('input[name="search"]')?.addEventListener('input', updateExportLink);
 
-// ── 列表刷新 ──
-document.body.addEventListener('refresh-list', function() {
-  htmx.ajax('GET', '/api/resumes/list', { target: '#resume-list' });
-});
+// ── 列表刷新（防重复注册） ──
+if (!window._refreshListBound) {
+  window._refreshListBound = true;
+  document.body.addEventListener('refresh-list', function() {
+  var params = new URLSearchParams();
+  var status = document.getElementById('filter-status')?.value || '';
+  var search = document.querySelector('input[name="search"]')?.value || '';
+  var degree = document.querySelector('select[name="degree"]')?.value || '';
+  var direction = document.querySelector('select[name="direction"]')?.value || '';
+  if (status) params.set('status', status);
+  if (search) params.set('search', search);
+  if (degree) params.set('degree', degree);
+  if (direction) params.set('direction', direction);
+  var qs = params.toString();
+  htmx.ajax('GET', '/api/resumes/list' + (qs ? '?' + qs : ''), { target: '#resume-list' });
+  });
+}
 </script>

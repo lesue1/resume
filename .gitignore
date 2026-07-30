@@ -1,5 +1,5 @@
-# API Key 配置文件 — 绝不上传 GitHub
-config.py
+# 环境变量（含 API Key）— 绝不上传 GitHub
+.env
 
 # SQLite 数据库文件 — 本地数据不提交
 *.db
@@ -10,4 +10,12 @@ __pycache__/
 
 # 虚拟环境
 venv/
-.env
+
+# 上传的简历附件
+static/uploads/
+
+# Mimirs 代码库记忆索引
+.mimirs/
+
+# 个人工具配置
+.mcp.json

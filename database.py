@@ -98,6 +98,12 @@ def init_db():
     except:
         pass  # 列已存在
 
+    # ── 兼容旧表：加 file_path 列（存储简历PDF附件路径） ──
+    try:
+        cur.execute("ALTER TABLE resumes ADD COLUMN file_path TEXT DEFAULT ''")
+    except:
+        pass
+
     # ── 索引（加速查询，IF NOT EXISTS 避免重复创建） ──
     cur.execute("CREATE INDEX IF NOT EXISTS idx_resumes_status ON resumes(interview_status)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_resumes_degree ON resumes(degree)")
@@ -296,6 +302,24 @@ def get_evaluations(limit=100):
     return df
 
 
+def get_evaluations_for_resume(email, name):
+    """根据邮箱或姓名查历史评估记录，按时间倒序。"""
+    conn = get_conn()
+    # 优先 email 精确匹配；如果 email 为空，用姓名匹配
+    if email:
+        df = pd.read_sql_query(
+            "SELECT * FROM evaluations WHERE email = ? ORDER BY evaluated_at DESC",
+            conn, params=(email,),
+        )
+    else:
+        df = pd.read_sql_query(
+            "SELECT * FROM evaluations WHERE candidate_name = ? ORDER BY evaluated_at DESC",
+            conn, params=(name,),
+        )
+    conn.close()
+    return df
+
+
 
 # =============================================================================
 # 简历库 CRUD
@@ -313,7 +337,7 @@ def save_resume(data: dict):
         'current_position', 'work_years', 'employment_status',
         'current_salary', 'expected_salary',
         'skills', 'tech_direction', 'source', 'target_position',
-        'interview_status', 'hr_notes', 'resume_text', 'has_top_papers'
+        'interview_status', 'hr_notes', 'resume_text', 'has_top_papers', 'file_path'
     ]
     # 构建 INSERT OR REPLACE 语句
     placeholders = ', '.join(['?'] * len(fields))

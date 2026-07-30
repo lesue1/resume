@@ -447,6 +447,14 @@
     .page-title { font-size: var(--text-2xl); }
     .card { padding: var(--space-4); }
   }
+
+  /* ── 滚动条 ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #d0d0d5; border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: #b0b0b5; }
+  /* Firefox */
+  * { scrollbar-width: thin; scrollbar-color: #d0d0d5 transparent; }
 </style>
 </head>
 <body>
@@ -578,7 +586,7 @@
     var el = document.getElementById('tab-' + name);
     if (el) el.classList.add('active');
     var btns = document.querySelectorAll('#input-tabs .tab-btn');
-    var idx = name === 'pdf' ? 0 : name === 'text' ? 1 : 2;
+    var idx = name === 'pdf' ? 0 : name === 'text' ? 1 : name === 'image' ? 2 : 3;
     if (btns[idx]) btns[idx].classList.add('active');
   };
 
@@ -635,6 +643,7 @@
       .then(function(data) {
         zone.style.opacity = '1'; zone.style.pointerEvents = 'auto';
         if (!data.success) { toast(data.error, 'error'); return; }
+        window._lastFilePath = data.file_path || '';
         window.setResumeText(data.text);
       })
       .catch(function(err) {
@@ -676,7 +685,7 @@
       });
   };
 
-  window.setupDragDrop = function(zoneId, handler) {
+  window.setupDragDrop = function(zoneId, handler, multi) {
     var zone = document.getElementById(zoneId);
     if (!zone) return;
     zone.addEventListener('dragover', function(e) { e.preventDefault(); zone.classList.add('dragover'); });
@@ -684,8 +693,12 @@
     zone.addEventListener('drop', function(e) {
       e.preventDefault();
       zone.classList.remove('dragover');
-      var file = e.dataTransfer.files[0];
-      if (file) handler(file);
+      if (multi) {
+        if (e.dataTransfer.files.length) handler(e.dataTransfer.files);
+      } else {
+        var file = e.dataTransfer.files[0];
+        if (file) handler(file);
+      }
     });
   };
 
@@ -717,6 +730,7 @@
     fd.append('email', (document.getElementById('cand-email') || {}).value || '');
     fd.append('phone', (document.getElementById('cand-phone') || {}).value || '');
     fd.append('job_title', (document.getElementById('cand-job') || {}).value || '');
+    fd.append('file_path', window._lastFilePath || '');
 
     fetch('/api/score', { method: 'POST', body: fd })
       .then(function(r) { return r.text(); })
@@ -802,9 +816,9 @@
             try {
               var parsed = JSON.parse(line.slice(6));
               if (parsed.done) { window._chatHistory.push({ q: question, a: fullText }); return; }
-              if (parsed.error) { bubble.innerHTML = '<span style=\"color:var(--red);\">error: ' + parsed.error + '</span>'; return; }
+              if (parsed.error) { bubble.innerHTML = '<span style=\"color:var(--red);\">error: ' + escHtml(parsed.error) + '</span>'; return; }
               if (parsed.token) { fullText += parsed.token; bubble.innerHTML = renderMarkdown(fullText); }
-            } catch(e) {}
+            } catch(e) { /* 不完整的 SSE chunk，等下一批数据 */ }
           }
           messagesDiv.scrollTop = messagesDiv.scrollHeight;
           processStream();
@@ -842,12 +856,315 @@
     div.textContent = str;
     return div.innerHTML;
   }
+  window.escHtml = escapeHtml;
+
+  // ── PDF 浮层预览 ──
+  window.openPdfModal = function(url, name) {
+    var overlay = document.getElementById('pdf-overlay');
+    var iframe = document.getElementById('pdf-iframe');
+    var title = document.getElementById('pdf-title');
+    if (!overlay) return;
+    if (title) title.textContent = name || '简历附件';
+    var dl = document.getElementById('pdf-dl');
+    if (iframe) iframe.src = url;
+    if (dl) dl.href = url;
+    overlay.style.display = 'flex';
+  };
+  window.closePdfModal = function() {
+    var overlay = document.getElementById('pdf-overlay');
+    if (overlay) overlay.style.display = 'none';
+    var iframe = document.getElementById('pdf-iframe');
+    if (iframe) iframe.src = '';
+  };
+
+  // ── 简历库：查看评估历史 ──
+  window.viewEvaluations = function(resumeId) {
+    var modal = document.getElementById('eval-modal');
+    var body = document.getElementById('eval-modal-body');
+    if (!modal || !body) return;
+    modal.style.display = 'flex';
+    body.innerHTML = '<div style="padding:var(--space-8);text-align:center;color:var(--text-tertiary);">加载中...</div>';
+
+    fetch('/api/resumes/' + resumeId + '/evaluations')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.success) { body.innerHTML = '<div class="eval-empty">' + escapeHtml(data.error || '查询失败') + '</div>'; return; }
+        if (!data.evaluations.length) { body.innerHTML = '<div class="eval-empty">暂无历史评估记录<br><span style="font-size:12px;color:var(--text-tertiary);">去 AI 评估页对该候选人评分后这里会出现记录</span></div>'; return; }
+        var dimColors = ['#1664FF','#3CC780','#FF8A00','#7442D4','#1AC6FF'];
+        var html = '';
+        data.evaluations.forEach(function(ev, idx) {
+          var date = ev.evaluated_at || '';
+          var color = ev.total_score >= 80 ? '#3CC780' : (ev.total_score >= 60 ? '#FF8A00' : '#e74c3c');
+          html += '<div style="background:var(--surface);border-radius:var(--radius-md);padding:var(--space-4);margin-bottom:var(--space-3);border:0.5px solid var(--border);">';
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2);">';
+          html += '<span style="font-weight:600;font-size:var(--text-sm);">' + escapeHtml(ev.job_title) + '<span style="font-weight:400;color:var(--text-tertiary);font-size:11px;margin-left:var(--space-2);">' + date + '</span></span>';
+          html += '<span style="font-size:var(--text-lg);font-weight:700;color:' + color + ';">' + ev.total_score + '</span></div>';
+          var scores = ev.scores || {};
+          Object.keys(scores).forEach(function(dim, di) {
+            var s = scores[dim];
+            var scoreVal = typeof s === 'object' ? (s.score || 0) : s;
+            var pct = Math.min(scoreVal, 100);
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:var(--text-xs);">';
+            html += '<span style="color:var(--text-secondary);min-width:80px;">' + escapeHtml(dim) + '</span>';
+            html += '<div style="flex:1;height:6px;background:var(--border);border-radius:3px;margin:0 var(--space-2);overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:' + (dimColors[di % dimColors.length]) + ';border-radius:3px;"></div></div>';
+            html += '<span style="font-weight:600;min-width:32px;text-align:right;">' + scoreVal + '</span></div>';
+          });
+          html += '</div>';
+        });
+        body.innerHTML = html;
+      })
+      .catch(function(err) { body.innerHTML = '<div class="eval-empty">网络错误: ' + escapeHtml(err.message) + '</div>'; });
+  };
+  window.closeEvalModal = function() {
+    var modal = document.getElementById('eval-modal');
+    if (modal) modal.style.display = 'none';
+  };
 
   // 初始化拖拽（评估页加载后调用）
   window._evalInit = function() {
     window.setupDragDrop('drop-zone', window.handlePDF);
     window.setupDragDrop('img-zone', window.handleImage);
+    window.setupDragDrop('batch-drop-zone', window.handleBatchFiles, true);
   };
+
+  // ═══════════════════════════════════════════
+  // 批量评估函数
+  // ═══════════════════════════════════════════
+  window._batchFiles = [];  // 存储解析后的文件 [{filename, text, chars, file_path, success}]
+
+  window.handleBatchFiles = function(fileList) {
+    var files = Array.from(fileList).filter(function(f) {
+      var name = (f.name || '').toLowerCase();
+      return name.endsWith('.pdf') || name.endsWith('.docx');
+    });
+    if (!files.length) { toast('没有找到 PDF/Word 文件', 'error'); return; }
+    if (files.length > 20) { toast('单次最多20份', 'error'); return; }
+
+    var statusEl = document.getElementById('batch-status');
+    var listEl = document.getElementById('batch-file-list');
+    if (statusEl) statusEl.textContent = '正在解析 ' + files.length + ' 份文件...';
+    if (listEl) listEl.innerHTML = '';
+
+    var fd = new FormData();
+    files.forEach(function(f) { fd.append('files', f); });
+
+    fetch('/api/batch/import', { method: 'POST', body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.success) { toast(data.error, 'error'); return; }
+        window._batchFiles = (data.files || []).filter(function(f) { return f.success; });
+        if (statusEl) statusEl.textContent = '已解析 ' + window._batchFiles.length + '/' + files.length + ' 份';
+        renderBatchFileList();
+      })
+      .catch(function(err) { toast(err.message, 'error'); });
+  };
+
+  function renderBatchFileList() {
+    var listEl = document.getElementById('batch-file-list');
+    var actionsEl = document.getElementById('batch-actions');
+    if (!listEl) return;
+
+    if (!window._batchFiles.length) {
+      listEl.innerHTML = '<p style="color:var(--text-tertiary);text-align:center;padding:12px;">没有成功解析的文件</p>';
+      if (actionsEl) actionsEl.style.display = 'none';
+      return;
+    }
+
+    var html = '';
+    window._batchFiles.forEach(function(f, i) {
+      html += '<div style="display:flex;align-items:center;gap:var(--space-2);padding:6px 0;border-bottom:0.5px solid var(--border);">';
+      html += '<input type="checkbox" checked id="batch-chk-' + i + '" onchange="updateBatchBtn()">';
+      html += '<span style="flex:1;font-size:var(--text-sm);">' + escapeHtml(f.filename) + '</span>';
+      html += '<span style="font-size:var(--text-xs);color:var(--text-tertiary);">' + f.chars + ' chars</span>';
+      html += '</div>';
+    });
+    listEl.innerHTML = html;
+    if (actionsEl) actionsEl.style.display = 'flex';
+    updateBatchBtn();
+  }
+
+  window.updateBatchBtn = function() {
+    var btn = document.getElementById('batch-score-btn');
+    if (!btn || !window._batchFiles.length) return;
+    var count = 0;
+    window._batchFiles.forEach(function(f, i) {
+      var chk = document.getElementById('batch-chk-' + i);
+      if (chk && chk.checked) count++;
+    });
+    btn.textContent = '🤖 AI 精评选中 (' + count + '份)';
+  };
+
+  window.runQuickFilter = function() {
+    var jdText = (document.getElementById('jd-text') || {}).value || '';
+    if (!jdText.trim()) { toast('请先填写岗位 JD', 'info'); return; }
+    if (!window._batchFiles.length) { toast('请先上传简历', 'info'); return; }
+
+    var resumes = window._batchFiles.map(function(f) {
+      return { name: f.filename, text: f.text };
+    });
+
+    var resultsEl = document.getElementById('batch-results');
+    if (resultsEl) resultsEl.innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-tertiary);">🔍 关键词匹配中...</div>';
+
+    fetch('/api/batch/quick-filter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jd_text: jdText, resumes: resumes }),
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.success) { toast(data.error, 'error'); return; }
+        renderBatchResults(data.results, false);
+      })
+      .catch(function(err) { toast(err.message, 'error'); });
+  };
+
+  window.runBatchScore = function() {
+    var jdText = (document.getElementById('jd-text') || {}).value || '';
+    if (!jdText.trim()) { toast('请先填写岗位 JD', 'info'); return; }
+
+    var selected = [];
+    window._batchFiles.forEach(function(f, i) {
+      var chk = document.getElementById('batch-chk-' + i);
+      if (chk && chk.checked) selected.push({ name: f.filename, text: f.text });
+    });
+    if (!selected.length) { toast('请至少勾选一份简历', 'info'); return; }
+
+    var resultsEl = document.getElementById('batch-results');
+    var progressEl = document.getElementById('batch-progress');
+    if (resultsEl) resultsEl.innerHTML = '';
+    if (progressEl) progressEl.innerHTML = '<div style="text-align:center;padding:8px;color:var(--accent);font-size:var(--text-sm);">🤖 AI 评分中 (0/' + selected.length + ')...</div>';
+
+    var btn = document.getElementById('batch-score-btn');
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+
+    var controller = new AbortController();
+    var timeout = setTimeout(function() { controller.abort(); }, 180000);
+
+    fetch('/api/batch/score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jd_text: jdText, selected: selected }),
+      signal: controller.signal,
+    }).then(function(response) {
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      clearTimeout(timeout);
+
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+      var results = [];
+
+      function processStream() {
+        reader.read().then(function(res) {
+          if (res.done) { if (btn) { btn.disabled = false; btn.style.opacity = '1'; } return; }
+          buffer += decoder.decode(res.value, { stream: true });
+          var lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (line.indexOf('data: ') !== 0) continue;
+            try {
+              var data = JSON.parse(line.slice(6));
+              if (data.type === 'progress') {
+                if (progressEl) progressEl.innerHTML = '<div style="text-align:center;padding:8px;color:var(--accent);font-size:var(--text-sm);">🤖 AI 评分中 (' + (data.index + 1) + '/' + data.total + '): ' + escapeHtml(data.name) + '</div>';
+              } else if (data.type === 'result') {
+                results.push(data);
+              } else if (data.type === 'done') {
+                if (progressEl) progressEl.innerHTML = '<div style="text-align:center;padding:8px;color:var(--green);font-size:var(--text-sm);">✅ 全部评分完成</div>';
+                renderBatchResults(data.sorted || results, true);
+                if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+              }
+            } catch(e) {}
+          }
+          processStream();
+        }).catch(function() {
+          if (progressEl) progressEl.innerHTML = '<div style="color:var(--red);text-align:center;">连接中断</div>';
+          if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+        });
+      }
+      processStream();
+    }).catch(function(err) {
+      clearTimeout(timeout);
+      if (progressEl) progressEl.innerHTML = '';
+      if (err.name === 'AbortError') toast('评分超时', 'error');
+      else toast(err.message, 'error');
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+    });
+  };
+
+  function renderBatchResults(list, showAiScore) {
+    var resultsEl = document.getElementById('batch-results');
+    if (!resultsEl || !list.length) return;
+
+    var dimColors = ['#1664FF','#3CC780','#FF8A00','#7442D4','#1AC6FF'];
+    var html = '<div style="font-weight:600;font-size:var(--text-sm);margin-bottom:var(--space-2);">📋 ' + (showAiScore ? '评分结果（按总分排序）' : '快速筛选结果（按命中率排序）') + '</div>';
+
+    list.forEach(function(r, idx) {
+      var scoreColor = r.total_score >= 80 ? '#3CC780' : (r.total_score >= 60 ? '#FF8A00' : '#e74c3c');
+      html += '<div style="background:var(--surface);border-radius:var(--radius-sm);padding:var(--space-3);margin-bottom:var(--space-2);border:0.5px solid var(--border);">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">';
+      html += '<span style="font-weight:600;font-size:var(--text-sm);">#' + (idx + 1) + ' ' + escapeHtml(r.name || r.filename || '') + '</span>';
+
+      if (showAiScore && r.total_score !== undefined) {
+        html += '<span style="font-size:var(--text-lg);font-weight:700;color:' + scoreColor + ';">' + r.total_score + '</span>';
+      } else if (r.match_pct !== undefined) {
+        var pct = r.match_pct;
+        var pctColor = pct >= 70 ? '#3CC780' : (pct >= 40 ? '#FF8A00' : '#e74c3c');
+        html += '<span style="font-size:var(--text-lg);font-weight:700;color:' + pctColor + ';">' + pct + '%</span>';
+      }
+
+      html += '</div>';
+
+      // 关键词标签
+      if (r.matched && r.matched.length) {
+        html += '<div style="margin-top:4px;">';
+        r.matched.slice(0, 8).forEach(function(k) {
+          html += '<span class="tag-sm" style="background:var(--green-light);color:#1a7a40;">' + escapeHtml(k) + '</span>';
+        });
+        if (r.missed && r.missed.length) {
+          r.missed.slice(0, 5).forEach(function(k) {
+            html += '<span class="tag-sm" style="opacity:0.5;">' + escapeHtml(k) + '</span>';
+          });
+        }
+        html += '</div>';
+      }
+
+      // AI 评分维度
+      if (showAiScore && r.scores) {
+        Object.keys(r.scores).forEach(function(dim, di) {
+          var s = r.scores[dim];
+          var scoreVal = typeof s === 'object' ? (s.score || 0) : s;
+          var pctVal = Math.min(scoreVal, 100);
+          html += '<div style="display:flex;align-items:center;gap:4px;font-size:var(--text-xs);padding:1px 0;">';
+          html += '<span style="color:var(--text-secondary);min-width:72px;">' + escapeHtml(dim) + '</span>';
+          html += '<div style="flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden;">';
+          html += '<div style="height:100%;width:' + pctVal + '%;background:' + (dimColors[di % dimColors.length]) + ';border-radius:2px;"></div></div>';
+          html += '<span style="font-weight:600;min-width:24px;text-align:right;">' + scoreVal + '</span>';
+          html += '</div>';
+        });
+      }
+
+      if (r.error) {
+        html += '<div style="color:var(--red);font-size:var(--text-xs);">⚠ ' + escapeHtml(r.error) + '</div>';
+      }
+
+      html += '</div>';
+    });
+
+    resultsEl.innerHTML = html;
+  }
 </script>
+
+<!-- PDF 浮层预览 -->
+<div id="pdf-overlay" style="display:none;position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.7);flex-direction:column;" onclick="closePdfModal()">
+  <div style="display:flex;align-items:center;gap:12px;padding:10px 20px;background:#1e1e20;color:#fff;flex-shrink:0;" onclick="event.stopPropagation()">
+    <button onclick="closePdfModal()" style="background:none;border:none;color:#ccc;font-size:16px;cursor:pointer;padding:4px 8px;">✕</button>
+    <span id="pdf-title" style="font-weight:600;font-size:14px;flex:1;">简历附件</span>
+    <a id="pdf-dl" href="#" download style="color:#4da3ff;font-size:13px;text-decoration:none;">下载</a>
+  </div>
+  <iframe id="pdf-iframe" src="" style="flex:1;width:100%;border:none;background:#525659;"></iframe>
+</div>
+
 </body>
 </html>

@@ -18,16 +18,17 @@
     <button class="tab-btn active" onclick="switchTab('pdf')">📄 PDF 上传</button>
     <button class="tab-btn" onclick="switchTab('text')">📝 粘贴文字</button>
     <button class="tab-btn" onclick="switchTab('image')">📸 图片识别</button>
+    <button class="tab-btn" onclick="switchTab('batch')">📦 批量评估</button>
   </div>
 
   <!-- PDF 上传 -->
   <div class="tab-panel active" id="tab-pdf">
     <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
       <div style="font-size:2.2rem;margin-bottom:4px;">📤</div>
-      <p style="font-weight:500;">点击上传或拖拽 PDF 到这里</p>
+      <p style="font-weight:500;">点击上传或拖拽 PDF / Word 到这里</p>
       <p id="file-name" style="color:var(--accent);font-weight:500;"></p>
     </div>
-    <input type="file" id="file-input" accept=".pdf" style="display:none;" onchange="handlePDF(this.files[0])">
+    <input type="file" id="file-input" accept=".pdf,.docx" style="display:none;" onchange="handlePDF(this.files[0])">
   </div>
 
   <!-- 粘贴文字 -->
@@ -45,6 +46,29 @@
     </div>
     <input type="file" id="img-input" accept="image/*" style="display:none;" onchange="handleImage(this.files[0])">
     <div id="ocr-status" style="margin-top:var(--space-2);"></div>
+  </div>
+
+  <!-- 批量上传 -->
+  <div class="tab-panel" id="tab-batch">
+    <div class="upload-zone" id="batch-drop-zone">
+      <div style="font-size:2.2rem;margin-bottom:4px;">📤</div>
+      <p style="font-weight:500;">拖拽多个 PDF / Word 到这里</p>
+      <p style="font-size:var(--text-xs);">或点击下方按钮选择文件/文件夹</p>
+    </div>
+    <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3);">
+      <input type="file" id="batch-file-input" accept=".pdf,.docx" multiple style="display:none;" onchange="handleBatchFiles(this.files)">
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('batch-file-input').click()">📎 选择文件</button>
+      <input type="file" id="batch-folder-input" webkitdirectory style="display:none;" onchange="handleBatchFiles(this.files)">
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('batch-folder-input').click()">📁 选择文件夹</button>
+    </div>
+    <div id="batch-status" style="margin-top:var(--space-3);font-size:var(--text-sm);color:var(--text-secondary);"></div>
+    <div id="batch-file-list" style="margin-top:var(--space-3);"></div>
+    <div id="batch-actions" style="display:none;margin-top:var(--space-3);display:flex;gap:var(--space-2);flex-wrap:wrap;">
+      <button class="btn btn-primary btn-sm" onclick="runQuickFilter()">🔍 快速筛选</button>
+      <button class="btn btn-sm" style="background:var(--accent);color:#fff;" onclick="runBatchScore()" id="batch-score-btn">🤖 AI 精评选中</button>
+    </div>
+    <div id="batch-results" style="margin-top:var(--space-4);"></div>
+    <div id="batch-progress" style="margin-top:var(--space-3);display:none;"></div>
   </div>
 
   <!-- 共享预览 -->

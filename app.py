@@ -13,21 +13,64 @@ app.py — Flask 主应用
 from flask import Flask, render_template, request, jsonify, send_file, redirect, make_response
 import os
 import io
+import time
+import threading
+
+# ── 简易频率限制（in-memory，单进程，重启清零） ──
+_rate_window = {}   # ip → [(timestamp, endpoint), ...]
+_rate_lock = threading.Lock()
+
+# 限制规则：key=endpoint, value=(window_seconds, max_requests)
+RATE_LIMITS = {
+    "/api/score":       (60, 10),    # AI 评分：每分钟最多 10 次（最贵）
+    "/api/followup":    (60, 15),    # 追问：每分钟最多 15 次
+    "/api/ai-summary":  (60, 5),     # AI 分析：每分钟最多 5 次
+    "/api/resumes/import": (60, 20), # 批量导入：每分钟最多 20 次
+    "/api/parse-pdf":   (60, 30),    # PDF 解析：每分钟最多 30 次
+    "/api/batch/import": (60, 15),   # 批量文件上传解析
+    "/api/batch/quick-filter": (60, 30),  # 关键词匹配（免费）
+    "/api/batch/score": (60, 8),     # 批量 AI 评分
+    "default":          (60, 60),    # 其他 API：每分钟最多 60 次
+}
+
+def check_rate_limit(ip, endpoint):
+    """检查是否超过频率限制。返回 (allowed, retry_after_seconds)。"""
+    with _rate_lock:
+        now = time.time()
+        rule = RATE_LIMITS.get(endpoint, RATE_LIMITS["default"])
+        window, max_req = rule
+
+        if ip not in _rate_window:
+            _rate_window[ip] = []
+        # 清理过期记录
+        _rate_window[ip] = [r for r in _rate_window[ip] if now - r[0] < window]
+        # 检查
+        count = len([r for r in _rate_window[ip] if r[1] == endpoint])
+        if count >= max_req:
+            oldest = min(r[0] for r in _rate_window[ip] if r[1] == endpoint)
+            retry_after = int(window - (now - oldest)) + 1
+            return False, max(retry_after, 1)
+        # 记录本次请求
+        _rate_window[ip].append((now, endpoint))
+        return True, 0
 import csv
 import json
+import re
+import uuid
 import html as _html
 
 # 导入自己的模块
 import config
 from database import (
-    init_db, get_conn, get_evaluations, save_evaluation,
-    get_resumes, update_status, delete_resume, save_resume,
+    init_db, get_conn, get_evaluations, get_evaluations_for_resume,
+    save_evaluation, get_resumes, update_status, delete_resume, save_resume,
     get_analytics_data, migrate_legacy_data,
     save_job, get_jobs, get_job, delete_job,
     get_stages, save_stage, delete_stage, reorder_stages,
 )
-from pdf_parser import extract_text
+from pdf_parser import extract_text, extract_resume_text
 from ai_scorer import score_resume, ask_followup, ask_followup_stream
+from keyword_matcher import quick_match_batch
 
 # ── OCR 模块（需 Tesseract 系统安装 + Pillow） ──
 
@@ -57,7 +100,8 @@ class OCRService:
             elif _os.path.exists("/usr/local/bin/tesseract"):
                 self._tesseract_exe = "/usr/local/bin/tesseract"
             else:
-                self.error = "Tesseract 未安装"
+                self.error = ("Tesseract 未安装 — 请从 https://github.com/UB-Mannheim/tesseract/wiki 下载安装，"
+                       "安装时勾选中文语言包，安装后重启本应用")
                 return
             # tessdata 优先用环境变量，其次用可执行文件旁边的路径
             self._tessdata_dir = _os.environ.get("TESSDATA_PREFIX", "")
@@ -127,7 +171,32 @@ _ocr = OCRService()
 # ── 创建 Flask 实例 ──
 # __name__ 告诉 Flask 当前模块名，Flask 用它来定位 templates/ 和 static/ 文件夹
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
+
+
+# ── 全局频率限制（before_request） ──
+@app.before_request
+def enforce_rate_limit():
+    """对所有 /api/ 路由检查频率限制。"""
+    if request.path.startswith("/api/"):
+        ip = request.remote_addr or "127.0.0.1"
+        endpoint = request.path
+        # 精确匹配 or 前缀匹配
+        if endpoint not in RATE_LIMITS:
+            # 试前缀匹配（动态路由如 /api/stages/1/delete）
+            for key in RATE_LIMITS:
+                if key != "default" and endpoint.startswith(key.rstrip("/")):
+                    endpoint = key
+                    break
+            else:
+                endpoint = "default"
+        allowed, retry = check_rate_limit(ip, endpoint)
+        if not allowed:
+            return jsonify({
+                "success": False,
+                "error": f"请求过于频繁，请 {retry} 秒后重试",
+                "retry_after": retry,
+            }), 429
 
 
 def render_page(template_name, **context):
@@ -318,7 +387,7 @@ def api_ocr_image():
 
 @app.route("/api/parse-pdf", methods=["POST"])
 def api_parse_pdf():
-    """上传 PDF → 提取文本 → 返回 JSON。"""
+    """上传 PDF → 存附件 → 提取文本 → 返回 JSON。"""
     if 'file' not in request.files:
         return jsonify({"success": False, "error": "没有收到文件"})
 
@@ -326,20 +395,36 @@ def api_parse_pdf():
     if file.filename == '':
         return jsonify({"success": False, "error": "文件名为空"})
 
-    if not file.filename.lower().endswith('.pdf'):
-        return jsonify({"success": False, "error": "只支持 PDF 文件"})
-
+    ext = os.path.splitext(file.filename)[-1].lower()
+    if ext not in ('.pdf', '.docx'):
+        return jsonify({"success": False, "error": "只支持 PDF 或 Word 文件"})
     try:
-        text = extract_text(file)  # 传文件对象，pdf_parser 内部处理
+        os.makedirs('static/uploads', exist_ok=True)
+        safe_name = f"{uuid.uuid4().hex[:10]}{ext}"
+        file_path = os.path.join('static', 'uploads', safe_name)
+        file.save(file_path)
+        try:
+            text = extract_resume_text(file_path, file.filename)
+        except Exception as ex:
+            try: os.remove(file_path)
+            except: pass
+            return jsonify({"success": False, "error": f"文件解析失败: {str(ex)}"})
         if not text:
-            return jsonify({"success": False, "error": "PDF 提取文本为空，可能是扫描件"})
+            try: os.remove(file_path)
+            except: pass
+            ocr_hint = " " + ("→ 切换到「📸 图片识别」tab上传截图" if _ocr.available else "→ 当前未安装OCR引擎，建议：①截图后用微信/QQ提取文字 ②安装Tesseract（见上方提示）")
+            hint = ("扫描件——文字层为空（可能是图片PDF）" + ocr_hint) if ext == '.pdf' else "请确认文件包含文字内容"
+            return jsonify({"success": False, "error": f"文件提取文本为空——{hint}"})
 
         return jsonify({
             "success": True,
             "text": text,
             "length": len(text),
+            "file_path": f"uploads/{safe_name}",
         })
     except Exception as e:
+        try: os.remove(file_path)
+        except: pass
         return jsonify({"success": False, "error": f"解析失败: {str(e)}"})
 
 
@@ -377,7 +462,6 @@ def api_score():
 
     # 同步写入简历库（resumes 表），让数据分析和简历列表能查到
     try:
-        import uuid
         cand_name = request.form.get("candidate_name", "").strip()
         resume_data = {
             "unique_code": f"EVAL-{uuid.uuid4().hex[:8].upper()}",
@@ -390,6 +474,7 @@ def api_score():
             "source": "AI评估",
             "tech_direction": "",
             "skills": json.dumps(result.get("highlights", []), ensure_ascii=False),
+            "file_path": request.form.get("file_path", "").strip(),
         }
         save_resume(resume_data)
     except Exception as e:
@@ -481,55 +566,87 @@ def api_resumes_list():
 
     # 动态加载阶段列表，用于状态下拉
     stages = get_stages()
-    stage_opts = ""
+    stage_colors = {}  # name → color 映射
+    stage_names = []   # 所有阶段名列表
     for s in stages:
-        stage_opts += f'<option value="{s["name"]}">{s["name"]}</option>'
+        stage_colors[s["name"]] = s["color"]
+        stage_names.append(s["name"])
 
     cards = ""
     for _, r in df.iterrows():
         status = r.get('interview_status', '') or ''
+        file_path = r.get('file_path', '') or ''
+        status_color = stage_colors.get(status, '#6e6e73')
+
+        # 状态下拉：当前状态作为默认显示，其他阶段作为切换选项
+        other_stages = [n for n in stage_names if n != status]
+        stage_opts = "".join(f'<option value="{_html.escape(n)}">{_html.escape(n)}</option>' for n in other_stages)
 
         skills = ""
         raw_skills = r.get('skills', '')
         if raw_skills:
             try:
                 skill_list = json.loads(raw_skills) if isinstance(raw_skills, str) else raw_skills
-                skills = " ".join([f"<span class='tag-sm'>{s}</span>" for s in skill_list[:5]])
+                skills = " ".join([f"<span class='tag-xs'>{_html.escape(str(s))}</span>" for s in skill_list[:4]])
             except:
-                skills = raw_skills
+                skills = " ".join([f"<span class='tag-xs'>{_html.escape(str(s))}</span>" for s in str(raw_skills).split(',')[:4]])
 
-        # 状态标签颜色：从 stages 中匹配
-        status_color = "#6e6e73"
-        for s in stages:
-            if s["name"] == status:
-                status_color = s["color"]
-                break
+        school = str(r.get('school', '') or '')
+        degree = str(r.get('degree', '') or '')
+        company = str(r.get('current_company', '') or '')
+        position = str(r.get('current_position', '') or '')
+        # 条件显示：空字段不显示该行
+        info_rows = ""
+        if school or degree:
+            info_rows += f'<div class="rc-info-row">{_html.escape(school)}{" · " if school and degree else ""}{_html.escape(degree)}</div>'
+        if company or position:
+            info_rows += f'<div class="rc-info-row">{_html.escape(company)}{" · " if company and position else ""}{_html.escape(position)}</div>'
 
         cards += f"""
-        <div class="resume-card" id="card-{r['id']}">
-            <div class="rc-header">
-                <span class="rc-name">{_html.escape(str(r.get('name', '未知')))}</span>
-                <span class="rc-status" style="background:{status_color}15;color:{status_color};">{_html.escape(str(status)) if status else '未设置'}</span>
-            </div>
-            <div class="rc-body">
-                <div class="rc-row">{_html.escape(str(r.get('school', '')))} · {_html.escape(str(r.get('degree', '')))} · {_html.escape(str(r.get('major', '')))}</div>
-                <div class="rc-row">{_html.escape(str(r.get('current_company', '')))} · {_html.escape(str(r.get('current_position', '')))} · {_html.escape(str(r.get('work_years', '')))}</div>
-                <div class="rc-skills">{skills}</div>
-            </div>
-            <div class="rc-footer">
-                <span>{_html.escape(str(r.get('source', '')))} · {(r.get('created_at') or '')[:10]}</span>
-                <div class="rc-actions">
+        <div class='resume-card{" has-file" if file_path else ""}' id='card-{r["id"]}' {"onclick=\"openPdfModal('/'+'"+_html.escape(file_path)+"','"+_html.escape(str(r.get('name','未知')))+"')\"" if file_path else ""}>
+            <div class="rc-top">
+                <div style="display:flex;align-items:center;gap:var(--space-2);min-width:0;">
+                    <span class="rc-name">{_html.escape(str(r.get('name', '未知')))}</span>
+                    <span class="rc-status-badge" style="background:{status_color}18;color:{status_color};border:0.5px solid {status_color}40;">{_html.escape(str(status)) if status else '未设置'}</span>
+                </div>
+                <div class="rc-badges" onclick="event.stopPropagation()">
+                    {"<span class='rc-file-badge' title='查看附件简历' onclick=\"event.stopPropagation();openPdfModal('/'+'"+_html.escape(file_path)+"','"+_html.escape(str(r.get('name','未知')))+"')\">📎</span>" if file_path else ""}
                     <select onchange="changeStatus({r['id']}, this.value)" class="status-select">
-                        <option value="">状态...</option>
+                        <option value="" selected>{_html.escape(str(status)) if status else '状态'}</option>
                         {stage_opts}
                     </select>
-                    <button onclick="deleteCard({r['id']})" class="btn-sm btn-danger">删</button>
+                </div>
+            </div>
+            <div class="rc-info">{info_rows}</div>
+            <div class="rc-skills">{skills}</div>
+            <div class="rc-footer">
+                <span title="{_html.escape(str(r.get('source', '')))}">{_html.escape(str(r.get('source', '')))} · {(r.get('created_at') or '')[:10]}</span>
+                <div class="rc-actions" onclick="event.stopPropagation()">
+                    <button onclick="viewEvaluations({r['id']})" class="btn-xs" style="color:var(--accent);">评估</button>
+                    <button onclick="deleteCard({r['id']}, event)" class="btn-xs">删</button>
                 </div>
             </div>
         </div>
         """
 
     return cards
+
+
+@app.route("/resumes/<int:resume_id>/view")
+def view_resume_file(resume_id):
+    """全屏浏览简历附件 PDF。"""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT name, file_path FROM resumes WHERE id = ?", (resume_id,)
+    ).fetchone()
+    conn.close()
+
+    if not row or not row["file_path"]:
+        return "<h2>该简历没有附件</h2><a href='/resumes'>返回简历库</a>", 404
+
+    return render_template("pdf_viewer.html",
+                           name=row["name"] or "未知",
+                           file_url=f"/{row['file_path']}")
 
 
 @app.route("/api/resumes/status", methods=["POST"])
@@ -545,6 +662,40 @@ def api_resume_status():
         return jsonify({"success": False, "error": str(e)})
 
 
+@app.route("/api/resumes/<int:resume_id>/evaluations")
+def api_resume_evaluations(resume_id):
+    """查某份简历的历史评估记录。"""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT email, name FROM resumes WHERE id = ?", (resume_id,)
+    ).fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({"success": False, "error": "简历不存在"})
+
+    email = row["email"] or ""
+    name = row["name"] or ""
+    df = get_evaluations_for_resume(email, name)
+
+    records = []
+    for _, r in df.iterrows():
+        scores = {}
+        try:
+            scores = json.loads(r.get("scores_json", "{}"))
+        except:
+            pass
+        records.append({
+            "id": r["id"],
+            "job_title": r.get("job_title", ""),
+            "total_score": r.get("total_score", 0),
+            "scores": scores,
+            "evaluated_at": str(r.get("evaluated_at", ""))[:19],
+        })
+
+    return jsonify({"success": True, "evaluations": records})
+
+
 @app.route("/api/resumes/delete", methods=["POST"])
 def api_resume_delete():
     """删除简历。"""
@@ -556,6 +707,235 @@ def api_resume_delete():
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/uploads/<path:filename>")
+def serve_upload(filename):
+    """内嵌预览 PDF——显式设 Content-Disposition: inline。"""
+    file_path = os.path.join('static', 'uploads', filename)
+    if not os.path.exists(file_path):
+        return "文件不存在", 404
+    response = make_response(send_file(file_path, mimetype='application/pdf'))
+    response.headers['Content-Disposition'] = 'inline; filename="' + filename + '"'
+    return response
+
+
+@app.route("/api/resumes/import", methods=["POST"])
+def api_resumes_import():
+    """上传 PDF 直接导入简历库，不走 AI 评估。"""
+    if 'file' not in request.files:
+        return jsonify({"success": False, "error": "没有收到文件"})
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"success": False, "error": "文件名为空"})
+
+    ext = os.path.splitext(file.filename)[-1].lower()
+    if ext not in ('.pdf', '.docx'):
+        return jsonify({"success": False, "error": "只支持 PDF 或 Word 文件"})
+
+    try:
+        os.makedirs('static/uploads', exist_ok=True)
+        safe_name = f"{uuid.uuid4().hex[:10]}{ext}"
+        file_path = os.path.join('static', 'uploads', safe_name)
+        file.save(file_path)
+
+        try:
+            text = extract_resume_text(file_path, file.filename)
+        except Exception as ex:
+            return jsonify({"success": False, "error": f"文件解析失败: {str(ex)}"})
+        if not text:
+            ocr_hint = " " + ("→ 切换到「📸 图片识别」tab上传截图" if _ocr.available else "→ 当前未安装OCR引擎，建议：①截图后用微信/QQ提取文字 ②安装Tesseract（见上方提示）")
+            hint = ("扫描件——文字层为空（可能是图片PDF）" + ocr_hint) if ext == '.pdf' else "请确认文件包含文字内容"
+            return jsonify({"success": False, "error": f"文件提取文本为空——{hint}"})
+
+        # ── AI 提取简历基本信息 ──
+        display_name = "未知"
+        email = ""; phone = ""
+        school = ""; degree = ""
+        company = ""; position = ""
+        skills_json = "[]"
+
+        try:
+            from ai_scorer import call_deepseek
+            extract_prompt = f"""从以下简历文本中提取基本信息，返回纯 JSON（不要 markdown、不要解释）：
+{{
+  "name": "姓名",
+  "email": "邮箱",
+  "phone": "手机号",
+  "school": "最高学历毕业院校全称",
+  "degree": "最高学历（博士/硕士/本科/大专）",
+  "company": "最近一段工作的公司全称",
+  "position": "最近一段工作的职位",
+  "skills": ["技能1", "技能2"]
+}}
+
+规则：
+- 没找到的字段用空字符串 ""
+- skills 取技术关键词，最多8个，中文技能名保留原文（如"机器学习"）
+- 只输出 JSON，不要其他文字
+
+简历文本：
+{text[:3000]}"""
+
+            ai_content, _ = call_deepseek([
+                {"role": "system", "content": "你是简历解析器。只输出JSON，不说废话。"},
+                {"role": "user", "content": extract_prompt},
+            ], temperature=0.0, max_tokens=500)
+
+            if ai_content:
+                clean = ai_content.strip()
+                if clean.startswith("```"):
+                    clean = clean.split("\n", 1)[-1]
+                    if clean.endswith("```"):
+                        clean = clean[:-3]
+                parsed = json.loads(clean)
+                display_name = parsed.get("name") or "未知"
+                email = parsed.get("email") or ""
+                phone = parsed.get("phone") or ""
+                school = parsed.get("school") or ""
+                degree = parsed.get("degree") or ""
+                company = parsed.get("company") or ""
+                position = parsed.get("position") or ""
+                skills_list = parsed.get("skills") or []
+                skills_json = json.dumps([s for s in skills_list if s][:8], ensure_ascii=False)
+            else:
+                raise Exception("AI 返回空内容")
+        except Exception as e:
+            print(f"[INFO] AI提取简历信息失败，用文件名兜底: {e}")
+            raw_name = os.path.splitext(file.filename)[0].strip()
+            if raw_name:
+                display_name = raw_name
+            # 邮箱电话用正则兜底
+            em = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+            if em: email = em.group(0)
+            pm = re.search(r'1[3-9]\d{9}', text)
+            if pm: phone = pm.group(0)
+
+        save_resume({
+            "unique_code": f"IMP-{uuid.uuid4().hex[:8].upper()}",
+            "name": display_name,
+            "email": email,
+            "phone": phone,
+            "school": school,
+            "degree": degree,
+            "current_company": company,
+            "current_position": position,
+            "skills": skills_json,
+            "resume_text": text,
+            "interview_status": "筛选",
+            "source": "手动导入",
+            "file_path": f"uploads/{safe_name}",
+        })
+
+        return jsonify({"success": True, "name": display_name, "length": len(text)})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": f"导入失败: {str(e)}"})
+
+
+# =============================================================================
+# 批量评估 API
+# =============================================================================
+
+@app.route("/api/batch/import", methods=["POST"])
+def api_batch_import():
+    files = request.files.getlist("files")
+    if not files or len(files) == 0:
+        return jsonify({"success": False, "error": "没有收到文件"})
+    if len(files) > 20:
+        return jsonify({"success": False, "error": "单次最多20份文件"})
+    results = []
+    os.makedirs('static/uploads', exist_ok=True)
+    for f in files:
+        if not f.filename:
+            continue
+        ext = os.path.splitext(f.filename)[-1].lower()
+        if ext not in ('.pdf', '.docx'):
+            results.append({"filename": f.filename, "error": "仅支持PDF/Word"})
+            continue
+        try:
+            safe_name = f"{uuid.uuid4().hex[:10]}{ext}"
+            file_path = os.path.join('static', 'uploads', safe_name)
+            f.save(file_path)
+            try:
+                text = extract_resume_text(file_path, f.filename)
+            except Exception as ex:
+                try: os.remove(file_path)
+                except: pass
+                results.append({"filename": f.filename, "error": f"解析失败:{str(ex)}"})
+                continue
+            if not text:
+                try: os.remove(file_path)
+                except: pass
+                results.append({"filename": f.filename, "error": "文件提取文本为空"})
+                continue
+            results.append({
+                "filename": f.filename, "text": text, "chars": len(text),
+                "file_path": f"uploads/{safe_name}", "success": True,
+            })
+        except Exception as e:
+            results.append({"filename": f.filename, "error": str(e)})
+    success_count = sum(1 for r in results if r.get("success"))
+    return jsonify({"success": True, "total": len(files), "parsed": success_count, "files": results})
+
+
+@app.route("/api/batch/quick-filter", methods=["POST"])
+def api_batch_quick_filter():
+    data = request.get_json()
+    if data is None:
+        return jsonify({"success": False, "error": "请求格式错误"}), 400
+    jd_text = data.get("jd_text", "")
+    resumes = data.get("resumes", [])
+    if not jd_text.strip():
+        return jsonify({"success": False, "error": "请先填写岗位JD"})
+    if not resumes:
+        return jsonify({"success": False, "error": "没有简历数据"})
+    results = quick_match_batch(jd_text, resumes)
+    return jsonify({"success": True, "results": results})
+
+
+@app.route("/api/batch/score", methods=["POST"])
+def api_batch_score():
+    data = request.get_json()
+    if data is None:
+        return jsonify({"success": False, "error": "请求格式错误"}), 400
+    jd_text = data.get("jd_text", "")
+    selected = data.get("selected", [])
+    if not selected:
+        return jsonify({"success": False, "error": "请至少选择一份简历"})
+
+    def generate():
+        import json as _json
+        scored = []
+        total = len(selected)
+        for i, resume in enumerate(selected):
+            name = resume.get("name", f"候选人{i+1}")
+            text = resume.get("text", "")
+            yield f"data: {_json.dumps({'type':'progress','index':i,'total':total,'name':name,'status':'scoring'})}\n\n"
+            if not text.strip():
+                scored.append({"name":name,"error":"简历文本为空","total_score":0})
+                yield f"data: {_json.dumps({'type':'result','index':i,'total':total,'name':name,'error':'简历文本为空'})}\n\n"
+                continue
+            result = score_resume(jd_text, text)
+            entry = {
+                "name":name,"success":result["success"],
+                "total_score":result.get("total_score",0),
+                "scores":result.get("scores",{}),
+                "highlights":result.get("highlights",[]),
+                "risks":result.get("risks",[]),
+                "summary":result.get("summary",""),
+                "error":result.get("error"),
+            }
+            scored.append(entry)
+            yield f"data: {_json.dumps({'type':'result','index':i,'total':total,**entry})}\n\n"
+        scored.sort(key=lambda x:x["total_score"], reverse=True)
+        yield f"data: {_json.dumps({'type':'done','sorted':scored})}\n\n"
+
+    return app.response_class(
+        generate(), mimetype='text/event-stream',
+        headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'}
+    )
 
 
 @app.route("/api/resumes/export")
@@ -660,12 +1040,10 @@ def api_analytics_ai_summary():
             {"role": "system", "content": "你是资深招聘总监，擅长用数据全面分析招聘全流程。回答覆盖所有数据维度，不遗漏。每条建议具体可执行，不说空话。"},
             {"role": "user", "content": prompt},
         ]
-        result = call_deepseek(messages, temperature=0.5)
-        if isinstance(result, tuple):
-            result = result[0]  # strip usage info for analytics
-        if result:
-            return jsonify({"success": True, "analysis": result})
-        return jsonify({"success": False, "error": "AI 调用失败"})
+        content, extra = call_deepseek(messages, temperature=0.5, max_tokens=config.ANALYTICS_MAX_TOKENS)
+        if content:
+            return jsonify({"success": True, "analysis": content})
+        return jsonify({"success": False, "error": extra or "AI 调用失败"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
@@ -697,10 +1075,21 @@ def api_analytics_all():
 # =============================================================================
 
 if __name__ == "__main__":
-    import os
-
     # 确保数据库已初始化
     init_db()
+
+    # API Key 已在 config.py 导入时校验，此处不需要额外检查
+
+    # ── 首次启动：自动生成演示数据 ──
+    conn_check = get_conn()
+    has_data = conn_check.execute("SELECT COUNT(*) FROM resumes").fetchone()[0] > 0
+    conn_check.close()
+    if not has_data:
+        print("[INFO] 简历库为空 → 自动生成演示数据（20份候选人 + 5个岗位）...")
+        import generate_mock
+        generate_mock.main()
+    else:
+        print(f"[INFO] 简历库已有 {has_data} 条记录，跳过种子数据生成")
 
     # 迁移旧数据（如果有）
     legacy_file = "示例简历.json"
@@ -718,4 +1107,4 @@ if __name__ == "__main__":
 
     # 线上用 0.0.0.0 + gunicorn，本地用 debug 模式
     debug = os.environ.get("FLASK_DEBUG", "1") == "1"
-    app.run(debug=debug, host="0.0.0.0", port=port)
+    app.run(debug=debug, host="127.0.0.1", port=port)

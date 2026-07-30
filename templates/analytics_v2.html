@@ -10,8 +10,8 @@
       <p style="font-size:var(--text-sm);color:var(--text-tertiary);margin-top:4px;">招聘管道全貌与人才洞察</p>
     </div>
     <div style="margin-left:auto;display:flex;gap:var(--space-2);">
-      <button onclick="openCardConfig()" class="btn btn-ghost btn-sm">📊 自定义</button>
-      <button id="btn-ai-analyze" class="btn btn-primary btn-sm" onclick="runAIAnalysis()">🤖 AI 诊断</button>
+      <button onclick="openCardConfig()" class="btn btn-ghost" style="font-size:var(--text-base);padding:10px 20px;">📊 自定义</button>
+      <button id="btn-ai-analyze" class="btn btn-primary" style="font-size:var(--text-base);padding:10px 20px;" onclick="runAIAnalysis()">🤖 AI 诊断</button>
     </div>
   </div>
 
@@ -195,9 +195,9 @@
   }
 </style>
 
-<!-- ══════════════════════ 阶段管理弹窗 ══════════════════════ -->
-<div id="stage-modal" style="display:none;">
-  <div class="stage-modal-card" style="max-width:480px;">
+<!-- ══════════════════════ 阶段管理弹窗（浮动遮罩） ══════════════════════ -->
+<div id="stage-modal" class="modal-overlay" style="display:none;" onclick="closeStageModal()">
+  <div class="stage-modal-card" style="max-width:480px;" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-5);">
       <span style="font-weight:600;font-size:var(--text-xl);letter-spacing:var(--tracking-tight);">⚙️ 管道阶段</span>
       <button onclick="closeStageModal()" class="btn btn-ghost btn-sm">✕</button>
@@ -563,17 +563,47 @@ function renderSource() {
   var W = svg.clientWidth || 400;
   var cx = W / 2, cy = 150, R = 100, ir = 45;
   var total = dd.reduce(function(s, d) { return s + d.count; }, 0);
+  var threshold = Math.max(total * 0.05, 1);  // 小于5%的合并
+
+  // 合并小类为"其他"
+  var main = [], other = { source: '其他', count: 0, merged: [] };
+  dd.forEach(function(d) {
+    if (d.count >= threshold) {
+      main.push(d);
+    } else {
+      other.count += d.count;
+      other.merged.push(d);
+    }
+  });
+  // 如果"其他"只有一项，干脆不合并，直接放回去
+  var slices = main.slice();
+  if (other.count > 0) {
+    if (other.merged.length === 1) {
+      slices.push(other.merged[0]);
+    } else {
+      slices.push(other);
+    }
+  }
 
   var html = '', angle = -Math.PI / 2;
-  dd.forEach(function(d, i) {
+  slices.forEach(function(d, i) {
+    var isOther = d.source === '其他';
     var slice = (d.count / total) * Math.PI * 2;
+    if (slice < 0.01) return;  // 忽略小数点导致的空隙
+
     var x1 = cx + R * Math.cos(angle), y1 = cy + R * Math.sin(angle);
     var x2 = cx + R * Math.cos(angle + slice), y2 = cy + R * Math.sin(angle + slice);
     var large = slice > Math.PI ? 1 : 0;
-    html += '<path d="M' + cx + ' ' + cy + ' L' + x1.toFixed(1) + ' ' + y1.toFixed(1) + ' A' + R + ' ' + R + ' 0 ' + large + ' 1 ' + x2.toFixed(1) + ' ' + y2.toFixed(1) + ' Z" fill="' + SC[i % SC.length] + '" stroke="#fff" stroke-width="1.5" class="pie-slice" data-i="' + i + '"/>';
+    html += '<path d="M' + cx + ' ' + cy + ' L' + x1.toFixed(1) + ' ' + y1.toFixed(1) + ' A' + R + ' ' + R + ' 0 ' + large + ' 1 ' + x2.toFixed(1) + ' ' + y2.toFixed(1) + ' Z" fill="' + SC[i % SC.length] + '" stroke="#fff" stroke-width="1.5" class="pie-slice" data-i="' + i + '"' + (isOther ? ' data-other="1"' : '') + '/>';
+
     var mid = angle + slice / 2;
-    var lx = cx + (R + 18) * Math.cos(mid), ly = cy + (R + 18) * Math.sin(mid);
-    html += '<text x="' + lx.toFixed(1) + '" y="' + (ly + 4).toFixed(1) + '" text-anchor="' + (Math.cos(mid) > 0 ? 'start' : 'end') + '" font-size="12" fill="#6e6e73">' + d.source + '</text>';
+    // 标签位置：占比小的往外多移一点避免重叠
+    var pct = d.count / total;
+    var offset = pct < 0.12 ? R + 22 + (0.12 - pct) * 80 : R + 18;
+    var lx = cx + offset * Math.cos(mid), ly = cy + offset * Math.sin(mid);
+    var anchor = Math.abs(Math.cos(mid)) < 0.15 ? 'middle' : (Math.cos(mid) > 0 ? 'start' : 'end');
+    var label = isOther ? '其他（' + other.merged.map(function(m){return m.source;}).join('/') + '）' : d.source;
+    html += '<text x="' + lx.toFixed(1) + '" y="' + (ly + 4).toFixed(1) + '" text-anchor="' + anchor + '" font-size="' + (label.length > 8 ? '10' : '12') + '" fill="#6e6e73">' + label + '</text>';
     angle += slice;
   });
   html += '<circle cx="' + cx + '" cy="' + cy + '" r="' + ir + '" fill="#fff"/>';
@@ -585,8 +615,18 @@ function renderSource() {
   svg.onmousemove = function(e) {
     var slice = e.target.closest('.pie-slice');
     if (!slice) return tip.hide();
-    var d = dd[parseInt(slice.dataset.i)];
-    tip.show('<span class="tt-label">' + d.source + '</span> <span class="tt-value" style="color:' + SC[parseInt(slice.dataset.i) % SC.length] + '">' + d.count + '人</span> <span class="tt-label">（' + Math.round(d.count/total*100) + '%）</span>', e);
+    var i = parseInt(slice.dataset.i);
+    var d = slices[i];
+    if (!d) return;
+    var pct = Math.round(d.count / total * 100);
+    var color = SC[i % SC.length];
+    if (slice.dataset.other === '1' && other.merged.length) {
+      // "其他" hover 时展开详细
+      var lines = other.merged.map(function(m){ return m.source + ': ' + m.count + '人'; }).join('<br>');
+      tip.show('<span class="tt-label">其他合计</span> <span class="tt-value" style="color:' + color + '">' + d.count + '人</span> <span class="tt-label">（' + pct + '%）</span><br><span class="tt-label" style="font-size:11px;">' + lines + '</span>', e);
+    } else {
+      tip.show('<span class="tt-label">' + d.source + '</span> <span class="tt-value" style="color:' + color + '">' + d.count + '人</span> <span class="tt-label">（' + pct + '%）</span>', e);
+    }
   };
   svg.onmouseleave = function() { tip.hide(); };
 }
@@ -665,7 +705,8 @@ function runAIAnalysis() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.success) {
-        el.innerHTML = data.analysis
+        var safe = escHtml(data.analysis);
+        el.innerHTML = safe
           .replace(/^### (.+)$/gm, '<h3>$1</h3>')
           .replace(/^## (.+)$/gm, '<h2>$1</h2>')
           .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')

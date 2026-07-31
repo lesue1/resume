@@ -15,8 +15,6 @@
 
 ## 截图
 
-> 📸 启动后截图放到 `screenshots/` 目录，替换下面占位。
-
 | AI 评估页 | 数据分析页 |
 |-----------|-----------|
 | ![评估](screenshots/evaluate.png) | ![分析](screenshots/analytics.png) |
